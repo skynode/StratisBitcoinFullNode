@@ -16,10 +16,9 @@ namespace Stratis.Bitcoin.Configuration
         /// <summary>
         /// Initializes the path locations.
         /// </summary>
-        /// <param name="settings">Node configuration.</param>
-        public DataFolder(NodeSettings settings)
+        /// <param name="path">The data directory root path.</param>
+        public DataFolder(string path)
         {
-            string path = settings.DataDir;
             this.CoinViewPath = Path.Combine(path, "coinview");
             this.AddressManagerFilePath = path;
             this.ChainPath = Path.Combine(path, "chain");
@@ -28,6 +27,7 @@ namespace Stratis.Bitcoin.Configuration
             this.RpcCookieFile = Path.Combine(path, ".cookie");
             this.WalletPath = Path.Combine(path);
             this.LogPath = Path.Combine(path, "Logs");
+            this.DnsMasterFilePath = path;
         }
 
         /// <summary>Address manager's database of peers.</summary>
@@ -61,5 +61,9 @@ namespace Stratis.Bitcoin.Configuration
         /// <summary>Path to log files.</summary>
         /// <seealso cref="Logging.LoggingConfiguration"/>
         public string LogPath { get; internal set; }
+
+        /// <summary>Path to DNS masterfile.</summary>
+        /// <seealso cref="Features.Dns.IMasterFile.Save"/>
+        public string DnsMasterFilePath { get; internal set; }
     }
 }

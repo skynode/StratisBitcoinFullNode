@@ -26,6 +26,30 @@ namespace NBitcoin
             Block.BlockSignature = saveSig;
         }
 
+        /// <summary> Bitcoin maximal value for the calculated time offset. If the value is over this limit, the time syncing feature will be switched off. </summary>
+        public const int BitcoinMaxTimeOffsetSeconds = 70 * 60;
+
+        /// <summary> Stratis maximal value for the calculated time offset. If the value is over this limit, the time syncing feature will be switched off. </summary>
+        public const int StratisMaxTimeOffsetSeconds = 25 * 60;
+
+        /// <summary> Bitcoin default value for the maximum tip age in seconds to consider the node in initial block download (24 hours). </summary>
+        public const int BitcoinDefaultMaxTipAgeInSeconds = 24 * 60 * 60;
+
+        /// <summary> Stratis default value for the maximum tip age in seconds to consider the node in initial block download (2 hours). </summary>
+        public const int StratisDefaultMaxTipAgeInSeconds = 2 * 60 * 60;
+
+        /// <summary> The name of the root folder containing the different Bitcoin blockchains (Main, TestNet, RegTest). </summary>
+        public const string BitcoinRootFolderName = "bitcoin";
+
+        /// <summary> The default name used for the Bitcoin configuration file. </summary>
+        public const string BitcoinDefaultConfigFilename = "bitcoin.conf";
+
+        /// <summary> The name of the root folder containing the different Stratis blockchains (StratisMain, StratisTest, StratisRegTest). </summary>
+        public const string StratisRootFolderName = "stratis";
+
+        /// <summary> The default name used for the Stratis configuration file. </summary>
+        public const string StratisDefaultConfigFilename = "stratis.conf";
+
         public static Network Main => Network.GetNetwork("Main") ?? InitMain();
 
         public static Network TestNet => Network.GetNetwork("TestNet") ?? InitTest();
@@ -40,9 +64,12 @@ namespace NBitcoin
 
         private static Network InitMain()
         {
-            Network network = new Network();
-
-            network.Name = "Main";
+            Network network = new Network
+            {
+                Name = "Main",
+                RootFolderName = BitcoinRootFolderName,
+                DefaultConfigFilename = BitcoinDefaultConfigFilename
+            };
 
             Consensus consensus = network.consensus;
 
@@ -65,11 +92,11 @@ namespace NBitcoin
 
             consensus.BIP9Deployments[BIP9Deployments.TestDummy] = new BIP9DeploymentsParameters(28, 1199145601, 1230767999);
             consensus.BIP9Deployments[BIP9Deployments.CSV] = new BIP9DeploymentsParameters(0, 1462060800, 1493596800);
-            consensus.BIP9Deployments[BIP9Deployments.Segwit] = new BIP9DeploymentsParameters(1, 0, 0);
+            consensus.BIP9Deployments[BIP9Deployments.Segwit] = new BIP9DeploymentsParameters(1, 1479168000, 1510704000);
 
             consensus.CoinType = 0;
 
-            consensus.DefaultAssumeValid = new uint256("0x0000000000000000003b9ce759c2a087d52abc4266f8f4ebd6d768b89defa50a"); // 477890
+            consensus.DefaultAssumeValid = new uint256("0x00000000000000000086a2362d78ffb4e41dc0b8775ff3c278bd994a5162348a"); // 499610
 
             // The message start string is designed to be unlikely to occur in normal data.
             // The characters are rarely used upper ASCII, not valid as UTF-8, and produce
@@ -114,7 +141,7 @@ namespace NBitcoin
             for (int i = 0; i < pnSeed.Length; i++)
             {
                 // It'll only connect to one or two seed nodes because once it connects,
-                // it'll get a pile of addresses with newer timestamps.				
+                // it'll get a pile of addresses with newer timestamps.                
                 NetworkAddress addr = new NetworkAddress();
                 // Seed nodes are given a random 'last seen time' of between one and two
                 // weeks ago.
@@ -122,6 +149,9 @@ namespace NBitcoin
                 addr.Endpoint = Utils.ParseIpEndpoint(pnSeed[i], network.DefaultPort);
                 network.fixedSeeds.Add(addr);
             }
+
+            network.MaxTimeOffsetSeconds = BitcoinMaxTimeOffsetSeconds;
+            network.MaxTipAge = BitcoinDefaultMaxTipAgeInSeconds;
             network.MinTxFee = 1000;
             network.FallbackFee = 20000;
             network.MinRelayTxFee = 1000;
@@ -134,9 +164,12 @@ namespace NBitcoin
 
         private static Network InitTest()
         {
-            Network network = new Network();
-
-            network.Name = "TestNet";
+            Network network = new Network
+            {
+                Name = "TestNet",
+                RootFolderName = BitcoinRootFolderName,
+                DefaultConfigFilename = BitcoinDefaultConfigFilename
+            };
 
             network.consensus.SubsidyHalvingInterval = 210000;
             network.consensus.MajorityEnforceBlockUpgrade = 51;
@@ -161,7 +194,7 @@ namespace NBitcoin
 
             network.consensus.CoinType = 1;
 
-            network.consensus.DefaultAssumeValid = new uint256("0x0000000002e9e7b00e1f6dc5123a04aad68dd0f0968d8c7aa45f6640795c37b1"); // 1135275 
+            network.consensus.DefaultAssumeValid = new uint256("0x000000003ccfe92231efee04df6621e7bb3f7f513588054e19f78d626b951f59"); // 1235126
 
             network.magic = 0x0709110B;
 
@@ -195,6 +228,8 @@ namespace NBitcoin
             network.bech32Encoders[(int)Bech32Type.WITNESS_PUBKEY_ADDRESS] = encoder;
             network.bech32Encoders[(int)Bech32Type.WITNESS_SCRIPT_ADDRESS] = encoder;
 
+            network.MaxTimeOffsetSeconds = BitcoinMaxTimeOffsetSeconds;
+            network.MaxTipAge = BitcoinDefaultMaxTipAgeInSeconds;
             network.MinTxFee = 1000;
             network.FallbackFee = 20000;
             network.MinRelayTxFee = 1000;
@@ -207,9 +242,13 @@ namespace NBitcoin
 
         private static Network InitReg()
         {
-            Network network = new Network();
-
-            network.Name = "RegTest";
+            Network network = new Network
+            {
+                Name = "RegTest",
+                RootFolderName = BitcoinRootFolderName,
+                DefaultConfigFilename = BitcoinDefaultConfigFilename
+            };
+            
             network.consensus.SubsidyHalvingInterval = 150;
             network.consensus.MajorityEnforceBlockUpgrade = 750;
             network.consensus.MajorityRejectBlockOutdated = 950;
@@ -231,7 +270,7 @@ namespace NBitcoin
 
             network.consensus.BIP9Deployments[BIP9Deployments.TestDummy] = new BIP9DeploymentsParameters(28, 0, 999999999);
             network.consensus.BIP9Deployments[BIP9Deployments.CSV] = new BIP9DeploymentsParameters(0, 0, 999999999);
-            network.consensus.BIP9Deployments[BIP9Deployments.Segwit] = new BIP9DeploymentsParameters(1, 0, 999999999);
+            network.consensus.BIP9Deployments[BIP9Deployments.Segwit] = new BIP9DeploymentsParameters(1, BIP9DeploymentsParameters.AlwaysActive, 999999999);
 
             network.genesis = CreateGenesisBlock(1296688602, 2, 0x207fffff, 1, Money.Coins(50m));
             network.consensus.HashGenesisBlock = network.genesis.GetHash();
@@ -255,6 +294,8 @@ namespace NBitcoin
             network.bech32Encoders[(int)Bech32Type.WITNESS_PUBKEY_ADDRESS] = encoder;
             network.bech32Encoders[(int)Bech32Type.WITNESS_SCRIPT_ADDRESS] = encoder;
 
+            network.MaxTimeOffsetSeconds = BitcoinMaxTimeOffsetSeconds;
+            network.MaxTipAge = BitcoinDefaultMaxTipAgeInSeconds;
             network.MinTxFee = 1000;
             network.FallbackFee = 20000;
             network.MinRelayTxFee = 1000;
@@ -266,11 +307,14 @@ namespace NBitcoin
         }
 
         private static Network InitStratisMain()
-        {			
+        {
             Block.BlockSignature = true;
             Transaction.TimeStamp = true;
 
             var consensus = new Consensus();
+
+            consensus.NetworkOptions = new NetworkOptions() { IsProofOfStake = true };
+            consensus.GetPoWHash = (n, h) => Crypto.HashX13.Instance.Hash(h.ToBytes(options:n)); 
 
             consensus.SubsidyHalvingInterval = 210000;
             consensus.MajorityEnforceBlockUpgrade = 750;
@@ -299,10 +343,10 @@ namespace NBitcoin
 
             consensus.CoinType = 105;
 
-            consensus.DefaultAssumeValid = new uint256("0x5acb513b96dcb727fbe85c7d50a1266e6414cdd4c3ae66d01313c34a81b466a2"); // 602240
+            consensus.DefaultAssumeValid = new uint256("0x8c2cf95f9ca72e13c8c4cdf15c2d7cc49993946fb49be4be147e106d502f1869"); // 642930
 
             Block genesis = CreateStratisGenesisBlock(1470467000, 1831645, 0x1e0fffff, 1, Money.Zero);
-            consensus.HashGenesisBlock = genesis.GetHash();
+            consensus.HashGenesisBlock = genesis.GetHash(consensus.NetworkOptions);
 
             // The message start string is designed to be unlikely to occur in normal data.
             // The characters are rarely used upper ASCII, not valid as UTF-8, and produce
@@ -319,12 +363,16 @@ namespace NBitcoin
 
             var builder = new NetworkBuilder()
                 .SetName("StratisMain")
+                .SetRootFolderName(StratisRootFolderName)
+                .SetDefaultConfigFilename(StratisDefaultConfigFilename)
                 .SetConsensus(consensus)
                 .SetMagic(magic)
                 .SetGenesis(genesis)
                 .SetPort(16178)
                 .SetRPCPort(16174)
                 .SetTxFees(10000, 60000, 10000)
+                .SetMaxTimeOffsetSeconds(StratisMaxTimeOffsetSeconds)
+                .SetMaxTipAge(StratisDefaultMaxTipAgeInSeconds)
 
                 .AddDNSSeeds(new[]
                 {
@@ -357,7 +405,7 @@ namespace NBitcoin
             for (int i = 0; i < seed.Length; i++)
             {
                 // It'll only connect to one or two seed nodes because once it connects,
-                // it'll get a pile of addresses with newer timestamps.				
+                // it'll get a pile of addresses with newer timestamps.                
                 NetworkAddress addr = new NetworkAddress();
                 // Seed nodes are given a random 'last seen time' of between one and two
                 // weeks ago.
@@ -388,23 +436,27 @@ namespace NBitcoin
             messageStart[3] = 0x11;
             var magic = BitConverter.ToUInt32(messageStart, 0); //0x5223570; 
 
-            var genesis = Network.StratisMain.GetGenesis().Clone();
+            var genesis = Network.StratisMain.GetGenesis();
             genesis.Header.Time = 1493909211;
             genesis.Header.Nonce = 2433759;
             genesis.Header.Bits = consensus.PowLimit;
-            consensus.HashGenesisBlock = genesis.GetHash();
+            consensus.HashGenesisBlock = genesis.GetHash(consensus.NetworkOptions);
 
             Assert(consensus.HashGenesisBlock == uint256.Parse("0x00000e246d7b73b88c9ab55f2e5e94d9e22d471def3df5ea448f5576b1d156b9"));
 
-            consensus.DefaultAssumeValid = new uint256("0x74427b2f85b5d9658ee81f7e73526441311122f2b23702b794be557ba43ca43e"); // 184096
+            consensus.DefaultAssumeValid = new uint256("0x12ae16993ce7f0836678f225b2f4b38154fa923bd1888f7490051ddaf4e9b7fa"); // 218810
 
             var builder = new NetworkBuilder()
                 .SetName("StratisTest")
+                .SetRootFolderName(StratisRootFolderName)
+                .SetDefaultConfigFilename(StratisDefaultConfigFilename)
                 .SetConsensus(consensus)
                 .SetMagic(magic)
                 .SetGenesis(genesis)
                 .SetPort(26178)
                 .SetRPCPort(26174)
+                .SetMaxTimeOffsetSeconds(StratisMaxTimeOffsetSeconds)
+                .SetMaxTipAge(StratisDefaultMaxTipAgeInSeconds)
                 .SetTxFees(10000, 60000, 10000)
                 .SetBase58Bytes(Base58Type.PUBKEY_ADDRESS, new byte[] { (65) })
                 .SetBase58Bytes(Base58Type.SCRIPT_ADDRESS, new byte[] { (196) })
@@ -449,11 +501,11 @@ namespace NBitcoin
             messageStart[3] = 0xef;
             var magic = BitConverter.ToUInt32(messageStart, 0); 
 
-            var genesis = Network.StratisMain.GetGenesis().Clone();
+            var genesis = Network.StratisMain.GetGenesis();
             genesis.Header.Time = 1494909211;
             genesis.Header.Nonce = 2433759;
             genesis.Header.Bits = consensus.PowLimit;
-            consensus.HashGenesisBlock = genesis.GetHash();
+            consensus.HashGenesisBlock = genesis.GetHash(consensus.NetworkOptions);
 
             Assert(consensus.HashGenesisBlock == uint256.Parse("0x93925104d664314f581bc7ecb7b4bad07bcfabd1cfce4256dbd2faddcf53bd1f"));
 
@@ -461,11 +513,15 @@ namespace NBitcoin
 
             var builder = new NetworkBuilder()
                 .SetName("StratisRegTest")
+                .SetRootFolderName(StratisRootFolderName)
+                .SetDefaultConfigFilename(StratisDefaultConfigFilename)
                 .SetConsensus(consensus)
                 .SetMagic(magic)
                 .SetGenesis(genesis)
                 .SetPort(18444)
                 .SetRPCPort(18442)
+                .SetMaxTimeOffsetSeconds(StratisMaxTimeOffsetSeconds)
+                .SetMaxTipAge(StratisDefaultMaxTipAgeInSeconds)
                 .SetBase58Bytes(Base58Type.PUBKEY_ADDRESS, new byte[] { (65) })
                 .SetBase58Bytes(Base58Type.SCRIPT_ADDRESS, new byte[] { (196) })
                 .SetBase58Bytes(Base58Type.SECRET_KEY, new byte[] { (65 + 128) })

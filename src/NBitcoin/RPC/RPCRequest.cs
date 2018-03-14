@@ -1,99 +1,100 @@
 ﻿#if !NOJSONNET
+using System;
+using System.IO;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace NBitcoin.RPC
 {
-	public class RPCRequest
-	{
-		public RPCRequest(string method, object[] parameters)
-			: this()
-		{
-			Method = method;
-			Params = parameters;
-		}
-		public RPCRequest()
-		{
-			JsonRpc = "1.0";
-			Id = 1;
-		}
-		public string JsonRpc
-		{
-			get;
-			set;
-		}
-		public int Id
-		{
-			get;
-			set;
-		}
-		public string Method
-		{
-			get;
-			set;
-		}
-		public object[] Params
-		{
-			get;
-			set;
-		}
+    public class RPCRequest
+    {
+        public RPCRequest(RPCOperations method, object[] parameters)
+            : this(method.ToString(), parameters)
+        {
 
-		public void WriteJSON(TextWriter writer)
-		{
-			var jsonWriter = new JsonTextWriter(writer);
-			WriteJSON(jsonWriter);
-			jsonWriter.Flush();
-		}
+        }
+        public RPCRequest(string method, object[] parameters)
+            : this()
+        {
+            Method = method;
+            Params = parameters;
+        }
+        public RPCRequest()
+        {
+            JsonRpc = "1.0";
+            Id = 1;
+        }
+        public string JsonRpc
+        {
+            get;
+            set;
+        }
+        public int Id
+        {
+            get;
+            set;
+        }
+        public string Method
+        {
+            get;
+            set;
+        }
+        public object[] Params
+        {
+            get;
+            set;
+        }
 
-		internal void WriteJSON(JsonTextWriter writer)
-		{
-			writer.WriteStartObject();
-			WriteProperty(writer, "jsonrpc", JsonRpc);
-			WriteProperty(writer, "id", Id);
-			WriteProperty(writer, "method", Method);
+        public void WriteJSON(TextWriter writer)
+        {
+            var jsonWriter = new JsonTextWriter(writer);
+            WriteJSON(jsonWriter);
+            jsonWriter.Flush();
+        }
 
-			writer.WritePropertyName("params");
-			writer.WriteStartArray();
+        internal void WriteJSON(JsonTextWriter writer)
+        {
+            writer.WriteStartObject();
+            WriteProperty(writer, "jsonrpc", JsonRpc);
+            WriteProperty(writer, "id", Id);
+            WriteProperty(writer, "method", Method);
 
-			if(Params != null)
-			{
-				for(int i = 0; i < Params.Length; i++)
-				{
-					if(Params[i] is JToken)
-					{
-						((JToken)Params[i]).WriteTo(writer);
-					}
-					else if(Params[i] is Array)
-					{
-						writer.WriteStartArray();
-						foreach(var x in (Array)Params[i])
-						{
-							writer.WriteValue(x);
-						}
-						writer.WriteEndArray();
-					}
-					else
-					{
-						writer.WriteValue(Params[i]);
-					}
-				}
-			}
+            writer.WritePropertyName("params");
+            writer.WriteStartArray();
 
-			writer.WriteEndArray();
-			writer.WriteEndObject();
-		}
+            if(Params != null)
+            {
+                for(int i = 0; i < Params.Length; i++)
+                {
+                    if(Params[i] is JToken)
+                    {
+                        ((JToken)Params[i]).WriteTo(writer);
+                    }
+                    else if(Params[i] is Array)
+                    {
+                        writer.WriteStartArray();
+                        foreach(var x in (Array)Params[i])
+                        {
+                            writer.WriteValue(x);
+                        }
+                        writer.WriteEndArray();
+                    }
+                    else
+                    {
+                        writer.WriteValue(Params[i]);
+                    }
+                }
+            }
 
-		private void WriteProperty<TValue>(JsonTextWriter writer, string property, TValue value)
-		{
-			writer.WritePropertyName(property);
-			writer.WriteValue(value);
-		}
-	}
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        private void WriteProperty<TValue>(JsonTextWriter writer, string property, TValue value)
+        {
+            writer.WritePropertyName(property);
+            writer.WriteValue(value);
+        }
+    }
 }
 #endif

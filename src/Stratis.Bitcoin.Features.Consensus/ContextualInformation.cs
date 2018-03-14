@@ -41,7 +41,7 @@ namespace Stratis.Bitcoin.Features.Consensus
     /// <summary>
     /// Context that contains variety of information regarding blocks validation and execution.
     /// </summary>
-    public class ContextInformation
+    public class RuleContext
     {
         public NBitcoin.Consensus Consensus { get; set; }
 
@@ -63,27 +63,34 @@ namespace Stratis.Bitcoin.Features.Consensus
 
         public bool CheckPow { get; set; }
 
+        /// <summary>Whether to skip block validation for this block due to either a checkpoint or assumevalid hash set.</summary>
+        public bool SkipValidation { get; set; }
+
+        /// <summary>The current tip of the chain that has been validated.</summary>
+        public ChainedBlock ConsensusTip { get; set; }
+
         public bool IsPoS
         {
             get { return this.Stake != null; }
         }
 
-        public ContextInformation()
+        public RuleContext()
         {
         }
 
-        public ContextInformation(BlockValidationContext blockValidationContext, NBitcoin.Consensus consensus)
+        public RuleContext(BlockValidationContext blockValidationContext, NBitcoin.Consensus consensus, ChainedBlock consensusTip)
         {
             Guard.NotNull(blockValidationContext, nameof(blockValidationContext));
             Guard.NotNull(consensus, nameof(consensus));
 
             this.BlockValidationContext = blockValidationContext;
             this.Consensus = consensus;
+            this.ConsensusTip = consensusTip;
 
             // TODO: adding flags to determine the flow of logic is not ideal
-            // a refator is in depbate on moving to a consensus rules engine
-            // this will remove hte need for flags as a validation will
-            // only use the required rules (i.e if the check pow rule will be ommited form the flow)
+            // a re-factor is in debate on moving to a consensus rules engine
+            // this will remove the need for flags as validation will only use 
+            // the required rules (i.e if the check pow rule will be omitted form the flow)
             this.CheckPow = true;
             this.CheckMerkleRoot = true;
         }

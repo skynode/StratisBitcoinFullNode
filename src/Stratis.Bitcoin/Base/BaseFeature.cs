@@ -12,10 +12,12 @@ using Stratis.Bitcoin.Builder;
 using Stratis.Bitcoin.Builder.Feature;
 using Stratis.Bitcoin.Configuration;
 using Stratis.Bitcoin.Configuration.Logging;
+using Stratis.Bitcoin.Configuration.Settings;
 using Stratis.Bitcoin.Connection;
 using Stratis.Bitcoin.Interfaces;
 using Stratis.Bitcoin.P2P;
 using Stratis.Bitcoin.P2P.Peer;
+using Stratis.Bitcoin.P2P.Protocol.Payloads;
 using Stratis.Bitcoin.Signals;
 using Stratis.Bitcoin.Utilities;
 
@@ -48,7 +50,7 @@ namespace Stratis.Bitcoin.Base
         private readonly List<IDisposable> disposableResources = new List<IDisposable>();
 
         /// <summary>Information about node's chain.</summary>
-        private readonly ChainState chainState;
+        private readonly IChainState chainState;
 
         /// <summary>Access to the database of blocks.</summary>
         private readonly ChainRepository chainRepository;
@@ -58,9 +60,6 @@ namespace Stratis.Bitcoin.Base
 
         /// <summary>Locations of important folders and files on disk.</summary>
         private readonly DataFolder dataFolder;
-
-        /// <summary>Specification of the network the node runs on - regtest/testnet/mainnet.</summary>
-        private readonly Network network;
 
         /// <summary>Thread safe chain of block headers from genesis.</summary>
         private readonly ConcurrentChain chain;
@@ -98,12 +97,14 @@ namespace Stratis.Bitcoin.Base
         /// <summary>A handler that can manage the lifetime of network peers.</summary>
         private readonly IPeerBanning peerBanning;
 
+        /// <summary>Provider of IBD state.</summary>
+        private readonly IInitialBlockDownloadState initialBlockDownloadState;
+
         /// <summary>
         /// Initializes a new instance of the object.
         /// </summary>
         /// <param name="nodeSettings">User defined node settings.</param>
         /// <param name="dataFolder">Locations of important folders and files on disk.</param>
-        /// <param name="network">Specification of the network the node runs on - regtest/testnet/mainnet.</param>
         /// <param name="nodeLifetime">Global application life cycle control - triggers when application shuts down.</param>
         /// <param name="chain">Thread safe access to the best chain of block headers (that the node is aware of) from genesis.</param>
         /// <param name="chainState">Information about node's chain.</param>
@@ -114,13 +115,13 @@ namespace Stratis.Bitcoin.Base
         /// <param name="timeSyncBehaviorState">State of time synchronization feature that stores collected data samples.</param>
         /// <param name="dbreezeSerializer">Provider of binary (de)serialization for data stored in the database.</param>
         /// <param name="loggerFactory">Factory to be used to create logger for the node.</param>
+        /// <param name="initialBlockDownloadState">Provider of IBD state.</param>
         public BaseFeature(
             NodeSettings nodeSettings,
             DataFolder dataFolder,
-            Network network,
             INodeLifetime nodeLifetime,
             ConcurrentChain chain,
-            ChainState chainState,
+            IChainState chainState,
             IConnectionManager connectionManager,
             ChainRepository chainRepository,
             IDateTimeProvider dateTimeProvider,
@@ -128,6 +129,7 @@ namespace Stratis.Bitcoin.Base
             TimeSyncBehaviorState timeSyncBehaviorState,
             DBreezeSerializer dbreezeSerializer,
             ILoggerFactory loggerFactory,
+            IInitialBlockDownloadState initialBlockDownloadState,
             IPeerBanning peerBanning,
             IPeerAddressManager peerAddressManager)
         {
@@ -135,7 +137,6 @@ namespace Stratis.Bitcoin.Base
             this.chainRepository = Guard.NotNull(chainRepository, nameof(chainRepository));
             this.nodeSettings = Guard.NotNull(nodeSettings, nameof(nodeSettings));
             this.dataFolder = Guard.NotNull(dataFolder, nameof(dataFolder));
-            this.network = Guard.NotNull(network, nameof(network));
             this.nodeLifetime = Guard.NotNull(nodeLifetime, nameof(nodeLifetime));
             this.chain = Guard.NotNull(chain, nameof(chain));
             this.connectionManager = Guard.NotNull(connectionManager, nameof(connectionManager));
@@ -144,6 +145,7 @@ namespace Stratis.Bitcoin.Base
             this.peerAddressManager = Guard.NotNull(peerAddressManager, nameof(peerAddressManager));
             this.peerAddressManager.PeerFilePath = this.dataFolder;
 
+            this.initialBlockDownloadState = initialBlockDownloadState;
             this.dateTimeProvider = dateTimeProvider;
             this.asyncLoopFactory = asyncLoopFactory;
             this.timeSyncBehaviorState = timeSyncBehaviorState;
@@ -155,13 +157,13 @@ namespace Stratis.Bitcoin.Base
         /// <inheritdoc />
         public void AddNodeStats(StringBuilder benchLogs)
         {
-            benchLogs.AppendLine("Headers.Height: ".PadRight(LoggingConfiguration.ColumnLength + 3) +
+            benchLogs.AppendLine("Headers.Height: ".PadRight(LoggingConfiguration.ColumnLength + 1) +
                                     this.chain.Tip.Height.ToString().PadRight(8) +
-                                    " Headers.Hash: ".PadRight(LoggingConfiguration.ColumnLength + 3) + this.chain.Tip.HashBlock);
+                                    " Headers.Hash: ".PadRight(LoggingConfiguration.ColumnLength - 1) + this.chain.Tip.HashBlock);
         }
 
         /// <inheritdoc />
-        public override void Start()
+        public override void Initialize()
         {
             this.logger.LogTrace("()");
 
@@ -171,7 +173,7 @@ namespace Stratis.Bitcoin.Base
 
             var connectionParameters = this.connectionManager.Parameters;
             connectionParameters.IsRelay = !this.nodeSettings.ConfigReader.GetOrDefault("blocksonly", false);
-            connectionParameters.TemplateBehaviors.Add(new ChainHeadersBehavior(this.chain, this.chainState, this.loggerFactory));
+            connectionParameters.TemplateBehaviors.Add(new ChainHeadersBehavior(this.chain, this.chainState, this.initialBlockDownloadState, this.loggerFactory));
             connectionParameters.TemplateBehaviors.Add(new PeerBanningBehavior(this.loggerFactory, this.peerBanning, this.nodeSettings));
 
             this.StartAddressManager(connectionParameters);
@@ -187,11 +189,18 @@ namespace Stratis.Bitcoin.Base
 
             this.disposableResources.Add(this.timeSyncBehaviorState);
             this.disposableResources.Add(this.chainRepository);
-            this.disposableResources.Add(this.connectionManager);
-            this.disposableResources.Add(this.nodeSettings.LoggerFactory);
 
             this.logger.LogTrace("(-)");
         }
+
+        /// <summary>
+        /// Prints command-line help.
+        /// </summary>
+        /// <param name="network">The network to extract values from.</param>
+        public static void PrintHelp(Network network)
+        {
+            NodeSettings.PrintHelp(network);
+        }        
 
         /// <summary>
         /// Initializes node's chain repository.
@@ -246,7 +255,7 @@ namespace Stratis.Bitcoin.Base
         }
 
         /// <inheritdoc />
-        public override void Stop()
+        public override void Dispose()
         {
             this.logger.LogInformation("Flushing peers...");
             this.flushAddressManagerLoop.Dispose();
@@ -294,7 +303,7 @@ namespace Stratis.Bitcoin.Base
                     services.AddSingleton<ConcurrentChain>(new ConcurrentChain(fullNodeBuilder.Network));
                     services.AddSingleton<IDateTimeProvider>(DateTimeProvider.Default);
                     services.AddSingleton<IInvalidBlockHashStore, InvalidBlockHashStore>();
-                    services.AddSingleton<ChainState>();
+                    services.AddSingleton<IChainState, ChainState>();
                     services.AddSingleton<ChainRepository>();
                     services.AddSingleton<TimeSyncBehaviorState>();
                     services.AddSingleton<IAsyncLoopFactory, AsyncLoopFactory>();
@@ -304,9 +313,15 @@ namespace Stratis.Bitcoin.Base
                     services.AddSingleton<INetworkPeerFactory, NetworkPeerFactory>();
                     services.AddSingleton<NetworkPeerConnectionParameters>(new NetworkPeerConnectionParameters());
                     services.AddSingleton<IConnectionManager, ConnectionManager>();
+                    services.AddSingleton<ConnectionManagerSettings>();
+                    services.AddSingleton<PayloadProvider>(new PayloadProvider().DiscoverPayloads());
 
                     // Peer address manager
                     services.AddSingleton<IPeerAddressManager, PeerAddressManager>();
+                    services.AddSingleton<IPeerConnector, PeerConnectorAddNode>();
+                    services.AddSingleton<IPeerConnector, PeerConnectorConnectNode>();
+                    services.AddSingleton<IPeerConnector, PeerConnectorDiscovery>();
+                    services.AddSingleton<IPeerDiscovery, PeerDiscovery>();
                 });
             });
 

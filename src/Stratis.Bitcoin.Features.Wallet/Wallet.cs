@@ -4,8 +4,8 @@ using System.Linq;
 using NBitcoin;
 using NBitcoin.JsonConverters;
 using Newtonsoft.Json;
-using Stratis.Bitcoin.Features.Wallet.JsonConverters;
 using Stratis.Bitcoin.Utilities;
+using Stratis.Bitcoin.Utilities.JsonConverters;
 
 namespace Stratis.Bitcoin.Features.Wallet
 {
@@ -738,10 +738,10 @@ namespace Stratis.Bitcoin.Features.Wallet
         public Money Amount { get; set; }
 
         /// <summary>
-        /// A list of payments made out in this transaction.
+        /// A value indicating whether this is a coin stake transaction or not.
         /// </summary>
-        [JsonProperty(PropertyName = "payments", NullValueHandling = NullValueHandling.Ignore)]
-        public ICollection<PaymentDetails> Payments { get; set; }
+        [JsonProperty(PropertyName = "isCoinStake", NullValueHandling = NullValueHandling.Ignore)]
+        public bool? IsCoinStake { get; set; }
 
         /// <summary>
         /// The index of this scriptPubKey in the transaction it is contained.
@@ -791,6 +791,13 @@ namespace Stratis.Bitcoin.Features.Wallet
         /// </summary>
         [JsonProperty(PropertyName = "hex", NullValueHandling = NullValueHandling.Ignore)]
         public string Hex { get; set; }
+
+        /// <summary>
+        /// Propagation state of this transaction.
+        /// </summary>
+        /// <remarks>Assume it's <c>true</c> if the field is <c>null</c>.</remarks>
+        [JsonProperty(PropertyName = "isPropagated", NullValueHandling = NullValueHandling.Ignore)]
+        public bool? IsPropagated { get; set; }
 
         /// <summary>
         /// Gets or sets the full transaction object.
@@ -890,6 +897,12 @@ namespace Stratis.Bitcoin.Features.Wallet
         /// </summary>
         [JsonProperty(PropertyName = "blockHeight", NullValueHandling = NullValueHandling.Ignore)]
         public int? BlockHeight { get; set; }
+
+        /// <summary>
+        /// A value indicating whether this is a coin stake transaction or not.
+        /// </summary>
+        [JsonProperty(PropertyName = "isCoinStake", NullValueHandling = NullValueHandling.Ignore)]
+        public bool? IsCoinStake { get; set; }
 
         /// <summary>
         /// Gets or sets the creation time.

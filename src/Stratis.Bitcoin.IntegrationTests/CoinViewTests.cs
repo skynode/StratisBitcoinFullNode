@@ -13,6 +13,8 @@ using Stratis.Bitcoin.Base.Deployments;
 using Stratis.Bitcoin.Configuration;
 using Stratis.Bitcoin.Features.Consensus;
 using Stratis.Bitcoin.Features.Consensus.CoinViews;
+using Stratis.Bitcoin.Features.Consensus.Rules.CommonRules;
+using Stratis.Bitcoin.IntegrationTests.EnvironmentMockUpHelpers;
 using Stratis.Bitcoin.Utilities;
 using Xunit;
 using static NBitcoin.Transaction;
@@ -43,15 +45,15 @@ namespace Stratis.Bitcoin.IntegrationTests
             using (NodeContext ctx = NodeContext.Create())
             {
                 var genesis = ctx.Network.GetGenesis();
-                var genesisChainedBlock = new ChainedBlock(genesis.Header, 0);
-                var chained = this.MakeNext(genesisChainedBlock);
+                var genesisChainedBlock = new ChainedBlock(genesis.Header, ctx.Network.GenesisHash ,0);
+                var chained = this.MakeNext(genesisChainedBlock, ctx.Network);
                 ctx.PersistentCoinView.SaveChangesAsync(new UnspentOutputs[] { new UnspentOutputs(genesis.Transactions[0].GetHash(), new Coins(genesis.Transactions[0], 0)) }, null, genesisChainedBlock.HashBlock, chained.HashBlock).Wait();
                 Assert.NotNull(ctx.PersistentCoinView.FetchCoinsAsync(new[] { genesis.Transactions[0].GetHash() }).Result.UnspentOutputs[0]);
                 Assert.Null(ctx.PersistentCoinView.FetchCoinsAsync(new[] { new uint256() }).Result.UnspentOutputs[0]);
 
                 var previous = chained;
-                chained = this.MakeNext(this.MakeNext(genesisChainedBlock));
-                chained = this.MakeNext(this.MakeNext(genesisChainedBlock));
+                chained = this.MakeNext(this.MakeNext(genesisChainedBlock, ctx.Network), ctx.Network);
+                chained = this.MakeNext(this.MakeNext(genesisChainedBlock, ctx.Network), ctx.Network);
                 ctx.PersistentCoinView.SaveChangesAsync(new UnspentOutputs[0], null, previous.HashBlock, chained.HashBlock).Wait();
                 Assert.Equal(chained.HashBlock, ctx.PersistentCoinView.GetBlockHashAsync().GetAwaiter().GetResult());
                 ctx.ReloadPersistentCoinView();
@@ -67,8 +69,8 @@ namespace Stratis.Bitcoin.IntegrationTests
             using (NodeContext ctx = NodeContext.Create())
             {
                 var genesis = ctx.Network.GetGenesis();
-                var genesisChainedBlock = new ChainedBlock(genesis.Header, 0);
-                var chained = this.MakeNext(genesisChainedBlock);
+                var genesisChainedBlock = new ChainedBlock(genesis.Header, ctx.Network.GenesisHash, 0);
+                var chained = this.MakeNext(genesisChainedBlock, ctx.Network);
                 var cacheCoinView = new CachedCoinView(ctx.PersistentCoinView, DateTimeProvider.Default, this.loggerFactory);
 
                 cacheCoinView.SaveChangesAsync(new UnspentOutputs[] { new UnspentOutputs(genesis.Transactions[0].GetHash(), new Coins(genesis.Transactions[0], 0)) }, null, genesisChainedBlock.HashBlock, chained.HashBlock).Wait();
@@ -248,11 +250,11 @@ namespace Stratis.Bitcoin.IntegrationTests
             }
         }
 
-        private ChainedBlock MakeNext(ChainedBlock previous)
+        private ChainedBlock MakeNext(ChainedBlock previous, Network network)
         {
             var header = previous.Header.Clone();
             header.HashPrevBlock = previous.HashBlock;
-            return new ChainedBlock(header, null, previous);
+            return new ChainedBlock(header, header.GetHash(network.NetworkOptions), previous);
         }
 
         [Fact]
@@ -328,7 +330,7 @@ namespace Stratis.Bitcoin.IntegrationTests
                 EnforceBIP34 = true
             };
 
-            var context = new ContextInformation
+            var context = new RuleContext
             {
                 BestBlock = new ContextBlockInformation
                 {
@@ -342,11 +344,11 @@ namespace Stratis.Bitcoin.IntegrationTests
             };
 
             Network.Main.Consensus.Options = new PowConsensusOptions();
-            ConsensusSettings consensusSettings = new ConsensusSettings(NodeSettings.Default(), this.loggerFactory);
+            context.Consensus = Network.Main.Consensus;
+            ConsensusSettings consensusSettings = new ConsensusSettings().Load(NodeSettings.Default());
             var validator = new PowConsensusValidator(Network.Main, new Checkpoints(Network.Main, consensusSettings), DateTimeProvider.Default, this.loggerFactory);
-            //validator.CheckBlockHeader(context);
-            validator.ContextualCheckBlock(context);
-            validator.CheckBlock(context);
+            new WitnessCommitmentsRule().RunAsync(context).GetAwaiter().GetResult();
+            new CheckPowTransactionRule().RunAsync(context);
         }
     }
 }

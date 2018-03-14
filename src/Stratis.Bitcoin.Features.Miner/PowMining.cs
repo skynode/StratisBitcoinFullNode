@@ -3,9 +3,10 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
-using Stratis.Bitcoin.Base;
-using Stratis.Bitcoin.Features.BlockStore;
 using Stratis.Bitcoin.Features.Consensus;
+using Stratis.Bitcoin.Features.Consensus.Interfaces;
+using Stratis.Bitcoin.Features.Miner.Interfaces;
+using Stratis.Bitcoin.Signals;
 using Stratis.Bitcoin.Utilities;
 
 namespace Stratis.Bitcoin.Features.Miner
@@ -16,15 +17,15 @@ namespace Stratis.Bitcoin.Features.Miner
         {
         }
 
-        public ReserveScript(Script reserveSfullNodecript)
+        public ReserveScript(Script reserveFullNodeScript)
         {
-            this.reserveSfullNodecript = reserveSfullNodecript;
+            this.ReserveFullNodeScript = reserveFullNodeScript;
         }
 
-        public Script reserveSfullNodecript { get; set; }
+        public Script ReserveFullNodeScript { get; set; }
     }
 
-    public class PowMining
+    public class PowMining : IPowMining
     {
         /// <summary>Default for "-blockmintxfee", which sets the minimum feerate for a transaction in blocks created by mining code.</summary>
         public const int DefaultBlockMinTxFee = 1000;
@@ -43,21 +44,13 @@ namespace Stratis.Bitcoin.Features.Miner
         private const int InnerLoopCount = 0x10000;
 
         /// <summary>Manager of the longest fully validated chain of blocks.</summary>
-        private readonly ConsensusLoop consensusLoop;
+        private readonly IConsensusLoop consensusLoop;
 
         private readonly ConcurrentChain chain;
 
         private readonly Network network;
 
-        private readonly IDateTimeProvider dateTimeProvider;
-
-        private readonly AssemblerFactory blockAssemblerFactory;
-
-        private readonly IBlockRepository blockRepository;
-
-        private readonly ChainState chainState;
-
-        private readonly Signals.Signals signals;
+        private readonly IAssemblerFactory blockAssemblerFactory;
 
         /// <summary>Global application life cycle control - triggers when application shuts down.</summary>
         private readonly INodeLifetime nodeLifetime;
@@ -72,14 +65,10 @@ namespace Stratis.Bitcoin.Features.Miner
         private readonly ILogger logger;
 
         public PowMining(
-            ConsensusLoop consensusLoop,
+            IConsensusLoop consensusLoop,
             ConcurrentChain chain,
             Network network,
-            IDateTimeProvider dateTimeProvider,
-            AssemblerFactory blockAssemblerFactory,
-            IBlockRepository blockRepository,
-            ChainState chainState,
-            Signals.Signals signals,
+            IAssemblerFactory blockAssemblerFactory,
             INodeLifetime nodeLifetime,
             IAsyncLoopFactory asyncLoopFactory,
             ILoggerFactory loggerFactory)
@@ -87,16 +76,13 @@ namespace Stratis.Bitcoin.Features.Miner
             this.consensusLoop = consensusLoop;
             this.chain = chain;
             this.network = network;
-            this.dateTimeProvider = dateTimeProvider;
             this.blockAssemblerFactory = blockAssemblerFactory;
-            this.blockRepository = blockRepository;
-            this.chainState = chainState;
-            this.signals = signals;
             this.nodeLifetime = nodeLifetime;
             this.asyncLoopFactory = asyncLoopFactory;
             this.logger = loggerFactory.CreateLogger(this.GetType().FullName);
         }
 
+        ///<inheritdoc/>
         public IAsyncLoop Mine(Script reserveScript)
         {
             if (this.mining != null)
@@ -104,7 +90,7 @@ namespace Stratis.Bitcoin.Features.Miner
 
             this.mining = this.asyncLoopFactory.Run("PowMining.Mine", token =>
             {
-                this.GenerateBlocks(new ReserveScript { reserveSfullNodecript = reserveScript }, int.MaxValue, int.MaxValue);
+                this.GenerateBlocks(new ReserveScript { ReserveFullNodeScript = reserveScript }, int.MaxValue, int.MaxValue);
                 this.mining = null;
                 return Task.CompletedTask;
             },
@@ -115,13 +101,7 @@ namespace Stratis.Bitcoin.Features.Miner
             return this.mining;
         }
 
-        /// <summary>
-        /// Generates up to a specified number of blocks with a limited number of attempts.
-        /// </summary>
-        /// <param name="reserveScript"></param>
-        /// <param name="generate">Number of blocks to generate. It is possible that less than the required number of blocks will be mined.</param>
-        /// <param name="maxTries">Maximum number of attempts the miner will calculate PoW hash in order to find suitable ones to generate specified amount of blocks.</param>
-        /// <returns>List with generated block's hashes</returns>
+        ///<inheritdoc/>
         public List<uint256> GenerateBlocks(ReserveScript reserveScript, ulong generate, ulong maxTries)
         {
             ulong nHeightStart = 0;
@@ -145,9 +125,9 @@ namespace Stratis.Bitcoin.Features.Miner
                     continue;
                 }
 
-                BlockTemplate pblockTemplate = this.blockAssemblerFactory.Create(chainTip).CreateNewBlock(reserveScript.reserveSfullNodecript);
+                BlockTemplate pblockTemplate = this.blockAssemblerFactory.Create(chainTip).CreateNewBlock(reserveScript.ReserveFullNodeScript);
 
-                if (Block.BlockSignature)
+                if (this.network.NetworkOptions.IsProofOfStake)
                 {
                     // Make sure the POS consensus rules are valid. This is required for generation of blocks inside tests,
                     // where it is possible to generate multiple blocks within one second.
@@ -157,10 +137,10 @@ namespace Stratis.Bitcoin.Features.Miner
                     }
                 }
 
-                this.IncrementExtraNonce(pblockTemplate.Block, chainTip, nExtraNonce);
+                nExtraNonce = this.IncrementExtraNonce(pblockTemplate.Block, chainTip, nExtraNonce);
                 Block pblock = pblockTemplate.Block;
 
-                while ((maxTries > 0) && (pblock.Header.Nonce < InnerLoopCount) && !pblock.CheckProofOfWork())
+                while ((maxTries > 0) && (pblock.Header.Nonce < InnerLoopCount) && !pblock.CheckProofOfWork(this.network.Consensus))
                 {
                     this.nodeLifetime.ApplicationStopping.ThrowIfCancellationRequested();
 
@@ -209,7 +189,8 @@ namespace Stratis.Bitcoin.Features.Miner
             return blocks;
         }
 
-        public void IncrementExtraNonce(Block pblock, ChainedBlock pindexPrev, int nExtraNonce)
+        ///<inheritdoc/>
+        public int IncrementExtraNonce(Block pblock, ChainedBlock pindexPrev, int nExtraNonce)
         {
             // Update nExtraNonce
             if (this.hashPrevBlock != pblock.Header.HashPrevBlock)
@@ -225,6 +206,8 @@ namespace Stratis.Bitcoin.Features.Miner
 
             Guard.Assert(txCoinbase.Inputs[0].ScriptSig.Length <= 100);
             pblock.UpdateMerkleRoot();
+
+            return nExtraNonce;
         }
     }
 }

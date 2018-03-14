@@ -5,7 +5,15 @@
     },
     "Stratis.StratisD Test": {
       "commandName": "Project",
-      "commandLineArgs": "-testnet -stake=1 -walletname=wallet1 -walletpassword=123456 -debug=1"
+      "commandLineArgs": "-testnet"
+    },
+    "Stratis.StratisD Test with RPC": {
+      "commandName": "Project",
+      "commandLineArgs": "-testnet -server -rpcpassword=password -rpcuser=user"
+    },
+    "Stratis.StratisD Test Keepalive 60s": {
+      "commandName": "Project",
+      "commandLineArgs": "-testnet -keepalive=60"
     }
   }
 }

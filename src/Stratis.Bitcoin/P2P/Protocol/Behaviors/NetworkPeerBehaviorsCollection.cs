@@ -5,15 +5,15 @@ namespace Stratis.Bitcoin.P2P.Protocol.Behaviors
 {
     public class NetworkPeerBehaviorsCollection : ThreadSafeCollection<INetworkPeerBehavior>
     {
-        private readonly NetworkPeer peer;
+        private readonly INetworkPeer peer;
         private bool delayAttach;
 
-        public NetworkPeerBehaviorsCollection(NetworkPeer peer)
+        public NetworkPeerBehaviorsCollection(INetworkPeer peer)
         {
             this.peer = peer;
         }
 
-        bool CanAttach
+        private bool CanAttach
         {
             get
             {

@@ -8,6 +8,8 @@ namespace NBitcoin
     public class NetworkBuilder
     {
         internal string Name;
+        internal string RootFolderName;
+        internal string DefaultConfigFilename;
         internal Dictionary<Base58Type, byte[]> Base58Prefixes;
         internal Dictionary<Bech32Type, Bech32Encoder> Bech32Prefixes;
         internal List<string> Aliases;
@@ -19,6 +21,8 @@ namespace NBitcoin
         internal List<NetworkAddress> FixedSeeds;
         internal Block Genesis;
         internal long MinTxFee;
+        internal int MaxTimeOffsetSeconds;
+        internal int MaxTipAge;
         internal long FallbackFee;
         internal long MinRelayTxFee;
 
@@ -37,11 +41,55 @@ namespace NBitcoin
             return this;
         }
 
+        /// <summary>
+        /// Sets the name of the folder containing the different blockchains.
+        /// </summary>
+        /// <param name="rootFolderName">The name of the folder.</param>
+        /// <returns>A <see cref="NetworkBuilder"/>.</returns>
+        public NetworkBuilder SetRootFolderName(string rootFolderName)
+        {
+            this.RootFolderName = rootFolderName;
+            return this;
+        }
+
+        /// <summary>
+        /// Sets the default name used for the network configuration file.
+        /// </summary>
+        /// <param name="defaultConfigFilename">The name of the file.</param>
+        /// <returns>A <see cref="NetworkBuilder"/>.</returns>
+        public NetworkBuilder SetDefaultConfigFilename(string defaultConfigFilename)
+        {
+            this.DefaultConfigFilename = defaultConfigFilename;
+            return this;
+        }
+
         public NetworkBuilder SetTxFees(long minTxFee, long fallbackFee, long minRelayTxFee)
         {
             this.MinTxFee = minTxFee;
             this.FallbackFee = fallbackFee;
             this.MinRelayTxFee = minRelayTxFee;
+            return this;
+        }
+
+        /// <summary>
+        /// Sets the maximal value allowed for the calculated time offset.
+        /// </summary>
+        /// <param name="maxTimeOffsetSeconds"> The maximal value allowed for the calculated time offset.</param>
+        /// <returns>A <see cref="NetworkBuilder"/>.</returns>
+        public NetworkBuilder SetMaxTimeOffsetSeconds(int maxTimeOffsetSeconds)
+        {
+            this.MaxTimeOffsetSeconds = maxTimeOffsetSeconds;
+            return this;
+        }
+
+        /// <summary>
+        /// Sets the maximum tip age in seconds to consider node in initial block download.
+        /// </summary>
+        /// <param name="maxTipAge">Maximum tip age in seconds to consider node in initial block download.</param>
+        /// <returns>A <see cref="NetworkBuilder"/>.</returns>
+        public NetworkBuilder SetMaxTipAge(int maxTipAge)
+        {
+            this.MaxTipAge = maxTipAge;
             return this;
         }
 
@@ -64,14 +112,16 @@ namespace NBitcoin
                 .SetMagic(this.Magic)
                 .SetPort(network.DefaultPort)
                 .SetRPCPort(network.RPCPort)
-                .SetTxFees(network.MinTxFee, network.FallbackFee, network.MinRelayTxFee);
+                .SetTxFees(network.MinTxFee, network.FallbackFee, network.MinRelayTxFee)
+                .SetMaxTimeOffsetSeconds(network.MaxTimeOffsetSeconds)
+                .SetMaxTipAge(network.MaxTipAge);
         }
 
         public NetworkBuilder AddAlias(string alias)
         {
             this.Aliases.Add(alias);
             return this;
-        }		
+        }        
 
         public NetworkBuilder SetRPCPort(int port)
         {
@@ -112,7 +162,7 @@ namespace NBitcoin
         {
             this.Genesis = genesis;
             return this;
-        }		
+        }        
 
         public NetworkBuilder SetBase58Bytes(Base58Type type, byte[] bytes)
         {

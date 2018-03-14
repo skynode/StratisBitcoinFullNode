@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using NBitcoin;
 using Stratis.Bitcoin.Builder;
 using Stratis.Bitcoin.Builder.Feature;
 using Stratis.Bitcoin.Configuration;
@@ -10,6 +11,7 @@ using Stratis.Bitcoin.Configuration.Logging;
 using Stratis.Bitcoin.Connection;
 using Stratis.Bitcoin.Features.Consensus;
 using Stratis.Bitcoin.Features.MemoryPool.Fee;
+using Stratis.Bitcoin.Features.MemoryPool.Interfaces;
 using Stratis.Bitcoin.Interfaces;
 
 [assembly: InternalsVisibleTo("Stratis.Bitcoin.Features.MemoryPool.Tests")]
@@ -43,6 +45,9 @@ namespace Stratis.Bitcoin.Features.MemoryPool
         /// <summary>Settings for the memory pool component.</summary>
         private readonly MempoolSettings mempoolSettings;
 
+        /// <summary>Settings for the node.</summary>
+        private readonly NodeSettings nodeSettings;
+
         /// <summary>
         /// Constructs a memory pool feature.
         /// </summary>
@@ -71,7 +76,13 @@ namespace Stratis.Bitcoin.Features.MemoryPool
             this.mempoolManager = mempoolManager;
             this.mempoolLogger = loggerFactory.CreateLogger(this.GetType().FullName);
             this.mempoolSettings = mempoolSettings;
-            this.mempoolSettings.Load(nodeSettings);
+            this.nodeSettings = nodeSettings;
+        }
+
+        /// <inheritdoc />
+        public override void LoadConfiguration()
+        {
+            this.mempoolSettings.Load(this.nodeSettings);
         }
 
         public void AddFeatureStats(StringBuilder benchLogs)
@@ -85,7 +96,7 @@ namespace Stratis.Bitcoin.Features.MemoryPool
         }
 
         /// <inheritdoc />
-        public override void Start()
+        public override void Initialize()
         {
             this.mempoolManager.LoadPoolAsync().GetAwaiter().GetResult();
 
@@ -94,8 +105,17 @@ namespace Stratis.Bitcoin.Features.MemoryPool
             this.mempoolSignaled.Start();
         }
 
+        /// <summary>
+        /// Prints command-line help.
+        /// </summary>
+        /// <param name="network">The network to extract values from.</param>
+        public static void PrintHelp(Network network)
+        {
+            MempoolSettings.PrintHelp(network);
+        }
+
         /// <inheritdoc />
-        public override void Stop()
+        public override void Dispose()
         {
             if (this.mempoolManager != null)
             {
@@ -140,7 +160,7 @@ namespace Stratis.Bitcoin.Features.MemoryPool
                 .FeatureServices(services =>
                     {
                         services.AddSingleton<MempoolSchedulerLock>();
-                        services.AddSingleton<TxMempool>();
+                        services.AddSingleton<ITxMempool, TxMempool>();
                         services.AddSingleton<BlockPolicyEstimator>();
                         services.AddSingleton<IMempoolValidator, MempoolValidator>();
                         services.AddSingleton<MempoolOrphans>();

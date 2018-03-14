@@ -27,13 +27,9 @@ namespace Stratis.Bitcoin.Features.Wallet
         /// </remarks>
         private const int SendCountThresholdLimit = 500;
 
-        private readonly ConcurrentChain chain;
-
         private readonly IWalletManager walletManager;
 
         private readonly IWalletFeePolicy walletFeePolicy;
-
-        private readonly Network network;
 
         private readonly CoinType coinType;
 
@@ -41,15 +37,12 @@ namespace Stratis.Bitcoin.Features.Wallet
 
         public WalletTransactionHandler(
             ILoggerFactory loggerFactory,
-            ConcurrentChain chain,
             IWalletManager walletManager,
             IWalletFeePolicy walletFeePolicy,
             Network network)
         {
-            this.chain = chain;
             this.walletManager = walletManager;
             this.walletFeePolicy = walletFeePolicy;
-            this.network = network;
             this.coinType = (CoinType)network.Consensus.CoinType;
             this.logger = loggerFactory.CreateLogger(this.GetType().FullName);
         }
@@ -69,9 +62,9 @@ namespace Stratis.Bitcoin.Features.Wallet
 
             if (!context.TransactionBuilder.Verify(context.Transaction, out TransactionPolicyError[] errors))
             {
-                this.logger.LogError($"Build transaction failed: {string.Join(" - ", errors.Select(s => s.ToString()))}");
-
-                throw new WalletException("Could not build a transaction, please make sure you entered the correct data.");
+                string errorsMessage = string.Join(" - ", errors.Select(s => s.ToString()));
+                this.logger.LogError($"Build transaction failed: {errorsMessage}");
+                throw new WalletException($"Could not build the transaction. Details: {errorsMessage}");
             }
 
             return context.Transaction;
@@ -328,7 +321,7 @@ namespace Stratis.Bitcoin.Features.Wallet
                 throw new WalletException("No amount specified.");
 
             if (context.Recipients.Any(a => a.SubtractFeeFromAmount))
-                throw new NotImplementedException("Subtracting the fee from the recipient is not supported yet.");
+                throw new NotImplementedException("Substracting the fee from the recipient is not supported yet.");
 
             foreach (var recipient in context.Recipients)
                 context.TransactionBuilder.Send(recipient.ScriptPubKey, recipient.Amount);
@@ -340,8 +333,19 @@ namespace Stratis.Bitcoin.Features.Wallet
         /// <param name="context">The context associated with the current transaction being built.</param>
         private void AddFee(TransactionBuildContext context)
         {
-            var feeRate = context.OverrideFeeRate ?? this.walletFeePolicy.GetFeeRate(context.FeeType.ToConfirmations());
-            var fee = context.TransactionBuilder.EstimateFees(feeRate);
+            Money fee;
+
+            // If the fee hasn't been set manually, calculate it based on the fee type that was chosen.
+            if (context.TransactionFee == null)
+            {
+                FeeRate feeRate = context.OverrideFeeRate ?? this.walletFeePolicy.GetFeeRate(context.FeeType.ToConfirmations());
+                fee = context.TransactionBuilder.EstimateFees(feeRate);
+            }
+            else
+            {
+                fee = context.TransactionFee;
+            }
+
             context.TransactionBuilder.SendFees(fee);
             context.TransactionFee = fee;
         }

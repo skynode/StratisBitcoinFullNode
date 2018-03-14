@@ -1,12 +1,10 @@
 ﻿using System;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using NBitcoin;
 using Stratis.Bitcoin.Builder;
 using Stratis.Bitcoin.Builder.Feature;
-using Stratis.Bitcoin.Features.Api.Models;
-using Stratis.Bitcoin.Utilities;
 
 namespace Stratis.Bitcoin.Features.Api
 {
@@ -15,100 +13,103 @@ namespace Stratis.Bitcoin.Features.Api
     /// </summary>
     public sealed class ApiFeature : FullNodeFeature
     {
-        /// <summary>The async loop we need to wait upon before we can shut down this feature.</summary>
-        private IAsyncLoop asyncLoop;
-
-        /// <summary>Factory for creating background async loop tasks.</summary>
-        private readonly IAsyncLoopFactory asyncLoopFactory;
-
         /// <summary>How long we are willing to wait for the API to stop.</summary>
-        private const int APIStopTimeoutSeconds = 10;
+        private const int ApiStopTimeoutSeconds = 10;
 
         private readonly IFullNodeBuilder fullNodeBuilder;
 
         private readonly FullNode fullNode;
 
+        private readonly ApiSettings apiSettings;
+
         private readonly ApiFeatureOptions apiFeatureOptions;
 
         private readonly ILogger logger;
 
-        private IWebHost webHost = null;
+        private IWebHost webHost;
 
         public ApiFeature(
             IFullNodeBuilder fullNodeBuilder,
             FullNode fullNode,
             ApiFeatureOptions apiFeatureOptions,
-            IAsyncLoopFactory asyncLoopFactory,
+            ApiSettings apiSettings,
             ILoggerFactory loggerFactory)
         {
             this.fullNodeBuilder = fullNodeBuilder;
             this.fullNode = fullNode;
             this.apiFeatureOptions = apiFeatureOptions;
-            this.asyncLoopFactory = asyncLoopFactory;
+            this.apiSettings = apiSettings;
             this.logger = loggerFactory.CreateLogger(this.GetType().FullName);
         }
 
-        public override void Start()
+        /// <inheritdoc />
+        public override void LoadConfiguration()
         {
-            this.logger.LogInformation("API starting on URL '{0}'.", this.fullNode.Settings.ApiUri);
-            this.webHost = Program.Initialize(this.fullNodeBuilder.Services, this.fullNode);
-
-            this.TryStartKeepaliveMonitor();
+            this.apiSettings.Load(this.fullNode.Settings);
         }
 
-        public override void Stop()
+        public override void Initialize()
         {
-            this.asyncLoop?.Dispose();
+            this.logger.LogInformation("API starting on URL '{0}'.", this.apiSettings.ApiUri);
+            this.webHost = Program.Initialize(this.fullNodeBuilder.Services, this.fullNode, this.apiSettings);
 
-            // Make sure we are releasing the listening ip address / port.
-            if (this.webHost != null)
+            // Start the keepalive timer, if set.
+            // If the timer expires, the node will shut down.
+            if (this.apiSettings.KeepaliveTimer != null)
             {
-                this.logger.LogInformation("API stopping on URL '{0}'.", this.fullNode.Settings.ApiUri);
-                this.webHost.StopAsync(TimeSpan.FromSeconds(APIStopTimeoutSeconds)).Wait();
-                this.webHost = null;
+                this.apiSettings.KeepaliveTimer.Elapsed += (sender, args) =>
+                {
+                    this.logger.LogInformation($"The application will shut down because the keepalive timer has elapsed.");
+
+                    this.apiSettings.KeepaliveTimer.Stop();
+                    this.apiSettings.KeepaliveTimer.Enabled = false;
+                    this.fullNode.NodeLifetime.StopApplication();
+                };
+
+                this.apiSettings.KeepaliveTimer.Start();
             }
         }
 
         /// <summary>
-        /// A KeepaliveMonitor when enabled will shutdown the
-        /// node if no one is calling the keepalive endpoint
-        /// during a certain trashold window
+        /// Prints command-line help.
         /// </summary>
-        public void TryStartKeepaliveMonitor()
+        /// <param name="network">The network to extract values from.</param>
+        public static void PrintHelp(Network network)
         {
-            if (this.apiFeatureOptions.KeepaliveMonitor?.KeepaliveInterval.TotalSeconds > 0)
+            ApiSettings.PrintHelp(network);
+        }
+
+        /// <inheritdoc />
+        public override void Dispose()
+        {
+            // Make sure the timer is stopped and disposed.
+            if (this.apiSettings.KeepaliveTimer != null)
             {
-                this.asyncLoop = this.asyncLoopFactory.Run("ApiFeature.KeepaliveMonitor", token =>
-                {
-                    // shortened for redability
-                    KeepaliveMonitor monitor = this.apiFeatureOptions.KeepaliveMonitor;
+                this.apiSettings.KeepaliveTimer.Stop();
+                this.apiSettings.KeepaliveTimer.Enabled = false;
+                this.apiSettings.KeepaliveTimer.Dispose();
+            }
 
-                    // check the trashold to trigger a shutdown
-                    if (monitor.LastBeat.Add(monitor.KeepaliveInterval) < this.fullNode.DateTimeProvider.GetUtcNow())
-                        this.fullNode.Stop();
-
-                    return Task.CompletedTask;
-                },
-                this.fullNode.NodeLifetime.ApplicationStopping,
-                repeatEvery: this.apiFeatureOptions.KeepaliveMonitor?.KeepaliveInterval,
-                startAfter: TimeSpans.Minute);
+            // Make sure we are releasing the listening ip address / port.
+            if (this.webHost != null)
+            {
+                this.logger.LogInformation("API stopping on URL '{0}'.", this.apiSettings.ApiUri);
+                this.webHost.StopAsync(TimeSpan.FromSeconds(ApiStopTimeoutSeconds)).Wait();
+                this.webHost = null;
             }
         }
     }
 
     public sealed class ApiFeatureOptions
     {
-        public KeepaliveMonitor KeepaliveMonitor { get; private set; }
-
-        public void Keepalive(TimeSpan timeSpan)
-        {
-            this.KeepaliveMonitor = new KeepaliveMonitor { KeepaliveInterval = timeSpan };
-        }
     }
 
+    /// <summary>
+    /// A class providing extension methods for <see cref="IFullNodeBuilder"/>.
+    /// </summary>
     public static class ApiFeatureExtension
     {
-        public static IFullNodeBuilder UseApi(this IFullNodeBuilder fullNodeBuilder, Action<ApiFeatureOptions> optionsAction = null)
+        public static IFullNodeBuilder UseApi(this IFullNodeBuilder fullNodeBuilder, Action<ApiSettings> setup = null, Action<ApiFeatureOptions> optionsAction = null)
         {
             // TODO: move the options in to the feature builder
             var options = new ApiFeatureOptions();
@@ -122,6 +123,7 @@ namespace Stratis.Bitcoin.Features.Api
                     {
                         services.AddSingleton(fullNodeBuilder);
                         services.AddSingleton(options);
+                        services.AddSingleton<ApiSettings>(new ApiSettings(setup));
                     });
             });
 

@@ -1,155 +1,208 @@
-﻿using NBitcoin.DataEncoders;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System;
+using NBitcoin.DataEncoders;
 
 namespace NBitcoin
 {
-	public class BitcoinWitPubKeyAddress : BitcoinAddress, IBech32Data
-	{
-		public BitcoinWitPubKeyAddress(string bech32, Network expectedNetwork = null)
-				: base(Validate(bech32, ref expectedNetwork), expectedNetwork)
-		{
-			var encoder = expectedNetwork.GetBech32Encoder(Bech32Type.WITNESS_PUBKEY_ADDRESS, true);
-			byte witVersion;
-			var decoded = encoder.Decode(bech32, out witVersion);
-			_Hash = new WitKeyId(decoded);
-		}
+    public class BitcoinWitPubKeyAddress : BitcoinAddress, IBech32Data
+    {
+        public BitcoinWitPubKeyAddress(string bech32, Network expectedNetwork)
+                : base(Validate(bech32, ref expectedNetwork), expectedNetwork)
+        {
+            var encoder = expectedNetwork.GetBech32Encoder(Bech32Type.WITNESS_PUBKEY_ADDRESS, true);
+            byte witVersion;
+            var decoded = encoder.Decode(bech32, out witVersion);
+            _Hash = new WitKeyId(decoded);
+        }
 
-		private static string Validate(string bech32, ref Network expectedNetwork)
-		{
-			if(bech32 == null)
-				throw new ArgumentNullException("bech32");
-			var networks = expectedNetwork == null ? Network.GetNetworks() : new[] { expectedNetwork };
-			foreach(var network in networks)
-			{
-				var encoder = expectedNetwork.GetBech32Encoder(Bech32Type.WITNESS_PUBKEY_ADDRESS, false);
-				if(encoder == null)
-					continue;
-				try
-				{
-					byte witVersion;
-					var data = encoder.Decode(bech32, out witVersion);
-					if(data.Length == 20 && witVersion == 0)
-					{
-						return bech32;
-					}
-				}
-				catch(Bech32FormatException) { throw; }
-				catch(FormatException) { continue; }
-			}
-			throw new FormatException("Invalid BitcoinWitPubKeyAddress");
-		}
+        private static string Validate(string bech32, ref Network expectedNetwork)
+        {
+            bool isValid = IsValid(bech32, ref expectedNetwork, out Exception exception);
 
-		public BitcoinWitPubKeyAddress(WitKeyId segwitKeyId, Network network) :
-			base(NotNull(segwitKeyId) ?? Network.CreateBech32(Bech32Type.WITNESS_PUBKEY_ADDRESS, segwitKeyId.ToBytes(), 0, network), network)
-		{
-			_Hash = segwitKeyId;
-		}
+            if (exception != null)
+                throw exception;
 
-		private static string NotNull(WitKeyId segwitKeyId)
-		{
-			if(segwitKeyId == null)
-				throw new ArgumentNullException("segwitKeyId");
-			return null;
-		}
+            if (isValid)
+                return bech32;
+            
+            throw new FormatException("Invalid BitcoinWitPubKeyAddress");
+        }
 
-		WitKeyId _Hash;
-		public WitKeyId Hash
-		{
-			get
-			{
-				return _Hash;
-			}
-		}
+        public static bool IsValid(string bech32, ref Network expectedNetwork, out Exception exception)
+        {
+            exception = null;
 
+            if (bech32 == null)
+            {
+                exception = new ArgumentNullException("bech32");
+                return false;
+            }
 
-		protected override Script GeneratePaymentScript()
-		{
-			return PayToWitTemplate.Instance.GenerateScriptPubKey(OpcodeType.OP_0, Hash._DestBytes);
-		}
+            var encoder = expectedNetwork.GetBech32Encoder(Bech32Type.WITNESS_PUBKEY_ADDRESS, false);
+            if (encoder == null)
+                return false;
 
-		public Bech32Type Type
-		{
-			get
-			{
-				return Bech32Type.WITNESS_PUBKEY_ADDRESS;
-			}
-		}
-	}
+            try
+            {
+                byte witVersion;
+                var data = encoder.Decode(bech32, out witVersion);
+                if (data.Length == 20 && witVersion == 0)
+                {
+                    return true;
+                }
+            }
+            catch (Bech32FormatException bech32FormatException)
+            {
+                exception = bech32FormatException;
+                return false;
+            }
+            catch (FormatException)
+            {
+                exception = new FormatException("Invalid BitcoinWitPubKeyAddress");
+                return false;
+            }
 
-	public class BitcoinWitScriptAddress : BitcoinAddress, IBech32Data
-	{
-		public BitcoinWitScriptAddress(string bech32, Network expectedNetwork = null)
-				: base(Validate(bech32, ref expectedNetwork), expectedNetwork)
-		{
-			var encoder = expectedNetwork.GetBech32Encoder(Bech32Type.WITNESS_SCRIPT_ADDRESS, true);
-			byte witVersion;
-			var decoded = encoder.Decode(bech32, out witVersion);
-			_Hash = new WitScriptId(decoded);
-		}
+            exception = new FormatException("Invalid BitcoinWitScriptAddress");
+            return false;
+        }
 
-		private static string Validate(string bech32, ref Network expectedNetwork)
-		{
-			if(bech32 == null)
-				throw new ArgumentNullException("bech32");
-			var networks = expectedNetwork == null ? Network.GetNetworks() : new[] { expectedNetwork };
-			foreach(var network in networks)
-			{
-				var encoder = expectedNetwork.GetBech32Encoder(Bech32Type.WITNESS_SCRIPT_ADDRESS, false);
-				if(encoder == null)
-					continue;
-				try
-				{
-					byte witVersion;
-					var data = encoder.Decode(bech32, out witVersion);
-					if(data.Length == 32 && witVersion == 0)
-					{
-						return bech32;
-					}
-				}
-				catch(Bech32FormatException) { throw; }
-				catch(FormatException) { continue; }
-			}
-			throw new FormatException("Invalid BitcoinWitScriptAddress");
-		}
+        public BitcoinWitPubKeyAddress(WitKeyId segwitKeyId, Network network) :
+            base(NotNull(segwitKeyId) ?? Network.CreateBech32(Bech32Type.WITNESS_PUBKEY_ADDRESS, segwitKeyId.ToBytes(), 0, network), network)
+        {
+            _Hash = segwitKeyId;
+        }
 
-		public BitcoinWitScriptAddress(WitScriptId segwitScriptId, Network network)
-	: base(NotNull(segwitScriptId) ?? Network.CreateBech32(Bech32Type.WITNESS_SCRIPT_ADDRESS, segwitScriptId.ToBytes(), 0, network), network)
-		{
-			_Hash = segwitScriptId;
-		}
+        private static string NotNull(WitKeyId segwitKeyId)
+        {
+            if(segwitKeyId == null)
+                throw new ArgumentNullException("segwitKeyId");
+            return null;
+        }
+
+        public bool VerifyMessage(string message, string signature)
+        {
+            var key = PubKey.RecoverFromMessage(message, signature);
+            return key.WitHash == this.Hash;
+        }
+
+        WitKeyId _Hash;
+        public WitKeyId Hash
+        {
+            get
+            {
+                return _Hash;
+            }
+        }
 
 
-		private static string NotNull(WitScriptId segwitScriptId)
-		{
-			if(segwitScriptId == null)
-				throw new ArgumentNullException("segwitScriptId");
-			return null;
-		}
+        protected override Script GeneratePaymentScript()
+        {
+            return PayToWitTemplate.Instance.GenerateScriptPubKey(OpcodeType.OP_0, Hash._DestBytes);
+        }
 
-		WitScriptId _Hash;
-		public WitScriptId Hash
-		{
-			get
-			{
-				return _Hash;
-			}
-		}		
+        public Bech32Type Type
+        {
+            get
+            {
+                return Bech32Type.WITNESS_PUBKEY_ADDRESS;
+            }
+        }
+    }
 
-		protected override Script GeneratePaymentScript()
-		{
-			return PayToWitTemplate.Instance.GenerateScriptPubKey(OpcodeType.OP_0, Hash._DestBytes);
-		}
+    public class BitcoinWitScriptAddress : BitcoinAddress, IBech32Data
+    {
+        public BitcoinWitScriptAddress(string bech32, Network expectedNetwork = null)
+                : base(Validate(bech32, ref expectedNetwork), expectedNetwork)
+        {
+            var encoder = expectedNetwork.GetBech32Encoder(Bech32Type.WITNESS_SCRIPT_ADDRESS, true);
+            byte witVersion;
+            var decoded = encoder.Decode(bech32, out witVersion);
+            _Hash = new WitScriptId(decoded);
+        }
 
-		public Bech32Type Type
-		{
-			get
-			{
-				return Bech32Type.WITNESS_SCRIPT_ADDRESS;
-			}
-		}
-	}
+        private static string Validate(string bech32, ref Network expectedNetwork)
+        {
+            bool isValid = IsValid(bech32, ref expectedNetwork, out Exception exception);
+
+            if (exception != null)
+                throw exception;
+
+            if (isValid)
+                return bech32;
+
+            throw new FormatException("Invalid BitcoinWitScriptAddress");
+        }
+
+        public static bool IsValid(string bech32, ref Network expectedNetwork, out Exception exception)
+        {
+            exception = null;
+
+            if (bech32 == null)
+            {
+                exception = new ArgumentNullException("bech32");
+                return false;
+            }
+
+            var encoder = expectedNetwork.GetBech32Encoder(Bech32Type.WITNESS_SCRIPT_ADDRESS, false);
+            if (encoder == null)
+                return false;
+            try
+            {
+                byte witVersion;
+                var data = encoder.Decode(bech32, out witVersion);
+                if (data.Length == 32 && witVersion == 0)
+                {
+                    return true;
+                }
+            }
+            catch (Bech32FormatException bech32FormatException)
+            {
+                exception = bech32FormatException;
+                return false;
+            }
+            catch (FormatException)
+            {
+                exception = new FormatException("Invalid BitcoinWitPubKeyAddress");
+                return false;
+            }
+
+            exception = new FormatException("Invalid BitcoinWitPubKeyAddress");
+            return false;
+        }
+
+        public BitcoinWitScriptAddress(WitScriptId segwitScriptId, Network network)
+    : base(NotNull(segwitScriptId) ?? Network.CreateBech32(Bech32Type.WITNESS_SCRIPT_ADDRESS, segwitScriptId.ToBytes(), 0, network), network)
+        {
+            _Hash = segwitScriptId;
+        }
+
+
+        private static string NotNull(WitScriptId segwitScriptId)
+        {
+            if(segwitScriptId == null)
+                throw new ArgumentNullException("segwitScriptId");
+            return null;
+        }
+
+        WitScriptId _Hash;
+        public WitScriptId Hash
+        {
+            get
+            {
+                return _Hash;
+            }
+        }        
+
+        protected override Script GeneratePaymentScript()
+        {
+            return PayToWitTemplate.Instance.GenerateScriptPubKey(OpcodeType.OP_0, Hash._DestBytes);
+        }
+
+        public Bech32Type Type
+        {
+            get
+            {
+                return Bech32Type.WITNESS_SCRIPT_ADDRESS;
+            }
+        }
+    }
 }

@@ -1,10 +1,9 @@
 ﻿using Microsoft.Extensions.Logging;
 using NBitcoin;
 using Stratis.Bitcoin.Configuration;
-using Stratis.Bitcoin.Features.LightWallet;
 using Xunit;
 
-namespace Stratis.Bitcoin.Features.MemoryPool.Tests
+namespace Stratis.Bitcoin.Features.LightWallet.Tests
 {
     /// <summary>
     /// Unit tests for light wallet's fixed fee policy.
@@ -67,7 +66,7 @@ namespace Stratis.Bitcoin.Features.MemoryPool.Tests
         public void MinTxFee_OnStratisNetwork_IsStratisDefault()
         {
             ILoggerFactory loggerFactory = new LoggerFactory();
-            NodeSettings nodeSettings = new NodeSettings(innerNetwork: Network.StratisTest).LoadArguments(new string[0]);
+            NodeSettings nodeSettings = new NodeSettings(Network.StratisTest);
             LightWalletFixedFeePolicy policy = new LightWalletFixedFeePolicy(loggerFactory, nodeSettings);
             Assert.Equal(new FeeRate(Network.StratisTest.FallbackFee), policy.FallbackTxFeeRate);
         }
@@ -76,7 +75,7 @@ namespace Stratis.Bitcoin.Features.MemoryPool.Tests
         public void MinTxFee_OnBitcoinNetwork_IsBitcoinDefault()
         {
             ILoggerFactory loggerFactory = new LoggerFactory();
-            NodeSettings nodeSettings = new NodeSettings(innerNetwork: Network.TestNet).LoadArguments(new string[0]);
+            NodeSettings nodeSettings = new NodeSettings(Network.TestNet);
             LightWalletFixedFeePolicy policy = new LightWalletFixedFeePolicy(loggerFactory, nodeSettings);
             Assert.Equal(new FeeRate(Network.TestNet.FallbackFee), policy.FallbackTxFeeRate);
         }

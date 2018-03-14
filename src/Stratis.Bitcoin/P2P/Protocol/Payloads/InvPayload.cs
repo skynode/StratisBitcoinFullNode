@@ -8,8 +8,11 @@ namespace Stratis.Bitcoin.P2P.Protocol.Payloads
     /// Announce the hash of a transaction or block.
     /// </summary>
     [Payload("inv")]
-    public class InvPayload : Payload, IBitcoinSerializable, IEnumerable<InventoryVector>
+    public class InvPayload : Payload, IEnumerable<InventoryVector>
     {
+        /// <summary>Maximal number of inventory items in response to "getblocks" message.</summary>
+        public const int MaxGetBlocksInventorySize = 500;
+
         public const int MaxInventorySize = 50000;
 
         private List<InventoryVector> inventory = new List<InventoryVector>();
@@ -29,11 +32,6 @@ namespace Stratis.Bitcoin.P2P.Protocol.Payloads
         {
         }
 
-        public InvPayload(InventoryType type, params uint256[] hashes)
-            : this(hashes.Select(h => new InventoryVector(type, h)).ToArray())
-        {
-        }
-
         public InvPayload(params InventoryVector[] invs)
         {
             this.inventory.AddRange(invs);
@@ -49,7 +47,7 @@ namespace Stratis.Bitcoin.P2P.Protocol.Payloads
 
         public override string ToString()
         {
-            return "Count: " + this.Inventory.Count.ToString();
+            return $"Count: {this.Inventory.Count}";
         }
 
         public IEnumerator<InventoryVector> GetEnumerator()

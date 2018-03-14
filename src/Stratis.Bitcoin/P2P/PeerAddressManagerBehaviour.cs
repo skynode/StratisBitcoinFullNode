@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Linq;
+using System.Threading.Tasks;
+using NBitcoin.Protocol;
 using Stratis.Bitcoin.P2P.Peer;
 using Stratis.Bitcoin.P2P.Protocol;
 using Stratis.Bitcoin.P2P.Protocol.Behaviors;
@@ -11,12 +13,30 @@ namespace Stratis.Bitcoin.P2P
     /// <summary>
     /// Behaviour implementation that encapsulates <see cref="IPeerAddressManager"/>.
     /// <para>
-    /// Subscribes to state change events from <see cref="NetworkPeer"/> and relays connection and handshake attempts to
+    /// Subscribes to state change events from <see cref="INetworkPeer"/> and relays connection and handshake attempts to
     /// the <see cref="IPeerAddressManager"/> instance.
     /// </para>
     /// </summary>
     public sealed class PeerAddressManagerBehaviour : NetworkPeerBehavior
     {
+        /// <summary>Provider of time functions.</summary>
+        private readonly IDateTimeProvider dateTimeProvider;
+
+        /// <summary>
+        /// See <see cref="PeerAddressManagerBehaviourMode"/> for the different modes and their
+        /// explanations.
+        /// </summary>
+        public PeerAddressManagerBehaviourMode Mode { get; set; }
+
+        /// <summary>Peer address manager instance, see <see cref="IPeerAddressManager"/>.</summary>
+        private readonly IPeerAddressManager peerAddressManager;
+
+        /// <summary>
+        /// The amount of peers that can be discovered before
+        /// <see cref="PeerDiscovery"/> stops finding new ones.
+        /// </summary>
+        public int PeersToDiscover { get; set; }
+
         public PeerAddressManagerBehaviour(IDateTimeProvider dateTimeProvider, IPeerAddressManager peerAddressManager)
         {
             Guard.NotNull(dateTimeProvider, nameof(dateTimeProvider));
@@ -28,56 +48,64 @@ namespace Stratis.Bitcoin.P2P
             this.PeersToDiscover = 1000;
         }
 
-        private readonly IDateTimeProvider dateTimeProvider;
-
-        public int PeersToDiscover { get; set; }
-
-        public PeerAddressManagerBehaviourMode Mode { get; set; }
-
-        /// <summary>Peer address manager instance, see <see cref="IPeerAddressManager"/>.</summary>
-        private readonly IPeerAddressManager peerAddressManager;
-
         protected override void AttachCore()
         {
-            this.AttachedPeer.StateChanged += this.AttachedPeer_StateChanged;
-            this.AttachedPeer.MessageReceived += this.AttachedPeer_MessageReceived;
-        }
-
-        private void AttachedPeer_MessageReceived(NetworkPeer peer, IncomingMessage message)
-        {
-            if ((this.Mode & PeerAddressManagerBehaviourMode.Advertise) != 0)
-            {
-                if (message.Message.Payload is GetAddrPayload getaddr)
-                    peer.SendMessageAsync(new AddrPayload(this.peerAddressManager.SelectPeersToConnectTo().Take(1000).ToArray()));
-            }
+            this.AttachedPeer.StateChanged.Register(this.OnStateChangedAsync);
+            this.AttachedPeer.MessageReceived.Register(this.OnMessageReceivedAsync);
 
             if ((this.Mode & PeerAddressManagerBehaviourMode.Discover) != 0)
             {
-                if (message.Message.Payload is AddrPayload addr)
-                    this.peerAddressManager.AddPeers(addr.Addresses, peer.RemoteSocketAddress, PeerIntroductionType.Discover);
+                if (this.AttachedPeer.State == NetworkPeerState.Connected)
+                    this.peerAddressManager.PeerConnected(this.AttachedPeer.PeerEndPoint, this.dateTimeProvider.GetUtcNow());
             }
         }
 
-        // TODO: We need to refactor this as the StateChanged event handlers only gets attached
-        // AFTER the peer has connected, which means that we can never go:
-        // if (peer.State == NetworkPeerState.Connected)
-        // which is more intuitive.
-        // This happens in PeerDiscovery as well where we connect and then disconnect straight after.
-        private void AttachedPeer_StateChanged(NetworkPeer peer, NetworkPeerState previousState)
+        private async Task OnMessageReceivedAsync(INetworkPeer peer, IncomingMessage message)
+        {
+            try
+            {
+                if ((this.Mode & PeerAddressManagerBehaviourMode.Advertise) != 0)
+                {
+                    if (message.Message.Payload is GetAddrPayload)
+                    {
+                        var endPoints = this.peerAddressManager.PeerSelector.SelectPeersForGetAddrPayload(1000).Select(p => p.Endpoint).ToArray();
+                        var addressPayload = new AddrPayload(endPoints.Select(p => new NetworkAddress(p)).ToArray());
+                        await peer.SendMessageAsync(addressPayload).ConfigureAwait(false);
+                    }
+
+                    if (message.Message.Payload is PingPayload ping || message.Message.Payload is PongPayload pong)
+                    {
+                        if (peer.State == NetworkPeerState.HandShaked)
+                            this.peerAddressManager.PeerSeen(peer.PeerEndPoint, this.dateTimeProvider.GetUtcNow());
+                    }
+                }
+
+                if ((this.Mode & PeerAddressManagerBehaviourMode.Discover) != 0)
+                {
+                    if (message.Message.Payload is AddrPayload addr)
+                        this.peerAddressManager.AddPeers(addr.Addresses.Select(a => a.Endpoint).ToArray(), peer.RemoteSocketAddress);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
+        private Task OnStateChangedAsync(INetworkPeer peer, NetworkPeerState previousState)
         {
             if ((this.Mode & PeerAddressManagerBehaviourMode.Discover) != 0)
             {
-                if (peer.State <= NetworkPeerState.Disconnecting && previousState == NetworkPeerState.HandShaked)
-                    this.peerAddressManager.PeerConnected(peer.PeerAddress.Endpoint, this.dateTimeProvider.GetUtcNow());
-
                 if (peer.State == NetworkPeerState.HandShaked)
-                    this.peerAddressManager.PeerHandshaked(peer.PeerAddress.Endpoint, this.dateTimeProvider.GetUtcNow());
+                    this.peerAddressManager.PeerHandshaked(peer.PeerEndPoint, this.dateTimeProvider.GetUtcNow());
             }
+
+            return Task.CompletedTask;
         }
 
         protected override void DetachCore()
         {
-            this.AttachedPeer.StateChanged -= this.AttachedPeer_StateChanged;
+            this.AttachedPeer.MessageReceived.Unregister(this.OnMessageReceivedAsync);
+            this.AttachedPeer.StateChanged.Unregister(this.OnStateChangedAsync);
         }
 
         public override object Clone()
@@ -90,6 +118,9 @@ namespace Stratis.Bitcoin.P2P
         }
     }
 
+    /// <summary>
+    /// Specifies how messages related to network peer discovery are handled.
+    /// </summary>
     [Flags]
     public enum PeerAddressManagerBehaviourMode
     {

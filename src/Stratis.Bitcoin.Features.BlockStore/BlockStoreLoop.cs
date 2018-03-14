@@ -8,6 +8,7 @@ using NBitcoin;
 using Stratis.Bitcoin.Base;
 using Stratis.Bitcoin.BlockPulling;
 using Stratis.Bitcoin.Features.BlockStore.LoopSteps;
+using Stratis.Bitcoin.Interfaces;
 using Stratis.Bitcoin.Utilities;
 
 namespace Stratis.Bitcoin.Features.BlockStore
@@ -32,7 +33,10 @@ namespace Stratis.Bitcoin.Features.BlockStore
         /// <summary>Thread safe access to the best chain of block headers (that the node is aware of) from genesis.</summary>
         internal readonly ConcurrentChain Chain;
 
-        public ChainState ChainState { get; }
+        /// <summary>Provider of IBD state.</summary>
+        public IInitialBlockDownloadState InitialBlockDownloadState { get; }
+
+        public IChainState ChainState { get; }
 
         /// <summary>Provider of time functions.</summary>
         private readonly IDateTimeProvider dateTimeProvider;
@@ -61,6 +65,18 @@ namespace Stratis.Bitcoin.Features.BlockStore
         /// <summary>The chain of steps that gets executed to find and download blocks.</summary>
         private BlockStoreStepChain stepChain;
 
+        /// <summary>Cached consensus tip.</summary>
+        /// <remarks>
+        /// Cached tip is needed in order to avoid race condition in the <see cref="DownloadAndStoreBlocksAsync"/>.
+        /// <para>
+        /// This condition happens when the actual ConsensusTip is updated but the block wasn't provided by signaler yet.
+        /// </para>
+        /// <para>
+        /// TODO: remove this quick fix later and solve the race condition by replacing the async loop with trigger-based invoking of <see cref="DownloadAndStoreBlocksAsync"/>.
+        /// </para>
+        /// </remarks>
+        private ChainedBlock CachedConsensusTip;
+
         public virtual string StoreName
         {
             get { return "BlockStore"; }
@@ -71,16 +87,17 @@ namespace Stratis.Bitcoin.Features.BlockStore
         /// <summary>The highest stored block in the repository.</summary>
         internal ChainedBlock StoreTip { get; private set; }
 
-        /// <summary>Public constructor for unit testing</summary>
+        /// <summary>Public constructor for unit testing.</summary>
         public BlockStoreLoop(IAsyncLoopFactory asyncLoopFactory,
             StoreBlockPuller blockPuller,
             IBlockRepository blockRepository,
             IBlockStoreCache cache,
             ConcurrentChain chain,
-            ChainState chainState,
+            IChainState chainState,
             StoreSettings storeSettings,
             INodeLifetime nodeLifetime,
             ILoggerFactory loggerFactory,
+            IInitialBlockDownloadState initialBlockDownloadState,
             IDateTimeProvider dateTimeProvider)
         {
             this.asyncLoopFactory = asyncLoopFactory;
@@ -93,6 +110,7 @@ namespace Stratis.Bitcoin.Features.BlockStore
             this.logger = loggerFactory.CreateLogger(this.GetType().FullName);
             this.loggerFactory = loggerFactory;
             this.dateTimeProvider = dateTimeProvider;
+            this.InitialBlockDownloadState = initialBlockDownloadState;
 
             this.PendingStorage = new ConcurrentDictionary<uint256, BlockPair>();
             this.blockStoreStats = new BlockStoreStats(this.BlockRepository, cache, this.dateTimeProvider, this.logger);
@@ -164,37 +182,30 @@ namespace Stratis.Bitcoin.Features.BlockStore
             this.stepChain.SetNextStep(new ProcessPendingStorageStep(this, this.loggerFactory));
             this.stepChain.SetNextStep(new DownloadBlockStep(this, this.loggerFactory, this.dateTimeProvider));
 
+            this.CachedConsensusTip = this.ChainState.ConsensusTip;
+
             this.StartLoop();
 
             this.logger.LogTrace("(-)");
         }
 
         /// <summary>
-        /// Adds a block to Pending Storage
+        /// Adds a block to Pending Storage.
         /// <para>
-        /// The <see cref="BlockStoreSignaled"/> calls this method when a new block is available. Only add the block to pending storage if:
+        /// The <see cref="BlockStoreSignaled"/> calls this method when a new block is available. Only add the block to pending storage if the store's tip is behind the given block.
         /// </para>
-        /// <list>
-        ///     <item>1: The block does exist on the chain.</item>
-        ///     <item>2: The store's tip is behind the given block.</item>
-        /// </list>
         /// </summary>
-        /// <param name="block">The block to add to pending storage</param>
+        /// <param name="blockPair">The block and its chained header pair to be added to pending storage.</param>
         /// <remarks>TODO: Possibly check the size of pending in memory</remarks>
-        public void AddToPending(Block block)
+        public void AddToPending(BlockPair blockPair)
         {
-            uint256 blockHash = block.GetHash();
-            this.logger.LogTrace("({0}:'{1}')", nameof(block), blockHash);
+            this.logger.LogTrace("({0}:'{1}')", nameof(blockPair), blockPair.ChainedBlock);
 
-            ChainedBlock chainedBlock = this.Chain.GetBlock(blockHash);
-            if (chainedBlock == null)
+            if (this.StoreTip.Height < blockPair.ChainedBlock.Height)
             {
-                this.logger.LogTrace("(-)[REORG]");
-                return;
+                this.PendingStorage.TryAdd(blockPair.ChainedBlock.HashBlock, blockPair);
+                this.CachedConsensusTip = blockPair.ChainedBlock;
             }
-
-            if (this.StoreTip.Height < chainedBlock.Height)
-                this.PendingStorage.TryAdd(chainedBlock.HashBlock, new BlockPair(block, chainedBlock));
 
             this.logger.LogTrace("(-)");
         }
@@ -257,7 +268,7 @@ namespace Stratis.Bitcoin.Features.BlockStore
 
             while (!cancellationToken.IsCancellationRequested)
             {
-                if (this.StoreTip.Height >= this.ChainState.ConsensusTip?.Height)
+                if (this.StoreTip.Height >= this.CachedConsensusTip?.Height)
                     break;
 
                 var nextChainedBlock = this.Chain.GetBlock(this.StoreTip.Height + 1);

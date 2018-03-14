@@ -12,10 +12,10 @@ namespace Stratis.Bitcoin.BlockPulling
     public struct PeerSample
     {
         /// <summary>Peer who provided the sample.</summary>
-        public IBlockPullerBehavior peer { get; set; }
+        public IBlockPullerBehavior Peer { get; set; }
 
         /// <summary>Downloading speed as number of milliseconds per KB.</summary>
-        public double timePerKb { get; set; }
+        public double TimePerKb { get; set; }
     }
 
     /// <summary>
@@ -30,10 +30,10 @@ namespace Stratis.Bitcoin.BlockPulling
     /// </remarks>
     public class QualityScore
     {
-        /// <summary>Maximal quality score of a peer node based on the node's past experience with the peer node.</summary>
+        /// <summary>Minimal quality score of a peer node based on the node's past experience with the peer node.</summary>
         public const double MinScore = 1.0;
 
-        /// <summary>Minimal quality score of a peer node based on the node's past experience with the peer node.</summary>
+        /// <summary>Maximal quality score of a peer node based on the node's past experience with the peer node.</summary>
         public const double MaxScore = 150.0;
 
         /// <summary>Instance logger.</summary>
@@ -95,8 +95,8 @@ namespace Stratis.Bitcoin.BlockPulling
             {
                 // Add new sample to the mix.
                 PeerSample newSample = new PeerSample();
-                newSample.timePerKb = timePerKb;
-                newSample.peer = peer;
+                newSample.TimePerKb = timePerKb;
+                newSample.Peer = peer;
 
                 if (this.peerReferenceCounter.ContainsKey(peer)) this.peerReferenceCounter[peer]++;
                 else this.peerReferenceCounter.Add(peer, 1);
@@ -105,11 +105,11 @@ namespace Stratis.Bitcoin.BlockPulling
                 if (this.samples.Add(newSample, out oldSample))
                 {
                     // If we reached the maximum number of samples, we need to remove oldest sample.
-                    this.samplesSum -= oldSample.timePerKb;
-                    this.peerReferenceCounter[oldSample.peer]--;
+                    this.samplesSum -= oldSample.TimePerKb;
+                    this.peerReferenceCounter[oldSample.Peer]--;
 
-                    if (this.peerReferenceCounter[oldSample.peer] == 0)
-                        this.peerReferenceCounter.Remove(oldSample.peer);
+                    if (this.peerReferenceCounter[oldSample.Peer] == 0)
+                        this.peerReferenceCounter.Remove(oldSample.Peer);
                 }
 
                 // Update the sum and the average with the latest data.

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
 using Stratis.Bitcoin.P2P;
@@ -44,29 +45,35 @@ namespace Stratis.Bitcoin.Connection
             this.dropThreshold = 0.8M;
         }
 
-        private void AttachedNodeOnMessageReceived(NetworkPeer node, IncomingMessage message)
+        private Task OnMessageReceivedAsync(INetworkPeer peer, IncomingMessage message)
         {
-            this.logger.LogTrace("({0}:'{1}',{2}:'{3}')", nameof(node), node.RemoteSocketEndpoint, nameof(message), message.Message.Command);
+            this.logger.LogTrace("({0}:'{1}',{2}:'{3}')", nameof(peer), peer.RemoteSocketEndpoint, nameof(message), message.Message.Command);
 
-            message.Message.IfPayloadIs<VersionPayload>(version =>
+            if (message.Message.Payload is VersionPayload version)
             {
-                IPeerConnector nodeGroup = this.connection.DiscoverNodesPeerConnector ?? this.connection.ConnectNodePeerConnector;
-                // Find how much 20% max nodes.
-                decimal thresholdCount = Math.Round(nodeGroup.MaximumNodeConnections * this.dropThreshold, MidpointRounding.ToEven);
+                IPeerConnector peerConnector = null;
+                if (this.connection.ConnectionSettings.Connect.Any())
+                    peerConnector = this.connection.PeerConnectors.First(pc => pc is PeerConnectorConnectNode);
+                else
+                    peerConnector = this.connection.PeerConnectors.First(pc => pc is PeerConnectorDiscovery);
 
-                if (thresholdCount < this.connection.ConnectedNodes.Count())
+                // Find how much 20% max nodes.
+                decimal thresholdCount = Math.Round(peerConnector.MaxOutboundConnections * this.dropThreshold, MidpointRounding.ToEven);
+
+                if (thresholdCount < this.connection.ConnectedPeers.Count())
                     if (version.StartHeight < this.chain.Height)
-                        this.AttachedPeer.DisconnectAsync($"Node at height = {version.StartHeight} too far behind current height");
-            });
+                        peer.Disconnect($"Node at height = {version.StartHeight} too far behind current height");
+            }
 
             this.logger.LogTrace("(-)");
+            return Task.CompletedTask;
         }
 
         protected override void AttachCore()
         {
             this.logger.LogTrace("()");
 
-            this.AttachedPeer.MessageReceived += this.AttachedNodeOnMessageReceived;
+            this.AttachedPeer.MessageReceived.Register(this.OnMessageReceivedAsync);
 
             this.logger.LogTrace("(-)");
         }
@@ -75,7 +82,7 @@ namespace Stratis.Bitcoin.Connection
         {
             this.logger.LogTrace("()");
 
-            this.AttachedPeer.MessageReceived -= this.AttachedNodeOnMessageReceived;
+            this.AttachedPeer.MessageReceived.Unregister(this.OnMessageReceivedAsync);
 
             this.logger.LogTrace("(-)");
         }

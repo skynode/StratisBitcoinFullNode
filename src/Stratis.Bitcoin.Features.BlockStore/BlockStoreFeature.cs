@@ -83,8 +83,13 @@ namespace Stratis.Bitcoin.Features.BlockStore
             this.nodeSettings = nodeSettings;
             this.logger = loggerFactory.CreateLogger(this.GetType().FullName);
             this.loggerFactory = loggerFactory;
-            storeSettings.Load(nodeSettings);
             this.storeSettings = storeSettings;
+        }
+
+        /// <inheritdoc />
+        public override void LoadConfiguration()
+        {
+            this.storeSettings.Load(this.nodeSettings);
         }
 
         public virtual BlockStoreBehavior BlockStoreBehaviorFactory()
@@ -94,12 +99,12 @@ namespace Stratis.Bitcoin.Features.BlockStore
 
         public void AddNodeStats(StringBuilder benchLogs)
         {
-            var highestBlock = (this.blockRepository as BlockRepository)?.HighestPersistedBlock;
+            var highestBlock = this.blockRepository.HighestPersistedBlock;
 
             if (highestBlock != null)
-                benchLogs.AppendLine($"{this.name}.Height: ".PadRight(LoggingConfiguration.ColumnLength + 3) +
+                benchLogs.AppendLine($"{this.name}.Height: ".PadRight(LoggingConfiguration.ColumnLength + 1) +
                     highestBlock.Height.ToString().PadRight(8) +
-                    $" {this.name}.Hash: ".PadRight(LoggingConfiguration.ColumnLength + 3) +
+                    $" {this.name}.Hash: ".PadRight(LoggingConfiguration.ColumnLength - 1) +
                     highestBlock.HashBlock);
         }
 
@@ -113,7 +118,7 @@ namespace Stratis.Bitcoin.Features.BlockStore
             return this.blockRepository.GetTrxBlockIdAsync(trxid);
         }
 
-        public override void Start()
+        public override void Initialize()
         {
             this.logger.LogTrace("()");
 
@@ -126,19 +131,27 @@ namespace Stratis.Bitcoin.Features.BlockStore
             this.signals.SubscribeForBlocks(this.blockStoreSignaled);
 
             this.blockRepository.InitializeAsync().GetAwaiter().GetResult();
-            this.blockStoreSignaled.RelayWorker();
             this.blockStoreLoop.InitializeAsync().GetAwaiter().GetResult();
 
             this.logger.LogTrace("(-)");
         }
 
-        public override void Stop()
+        /// <summary>
+        /// Prints command-line help.
+        /// </summary>
+        /// <param name="network">The network to extract values from.</param>
+        public static void PrintHelp(Network network)
+        {
+            StoreSettings.PrintHelp(network);
+        }
+
+        /// <inheritdoc />
+        public override void Dispose()
         {
             this.logger.LogInformation("Stopping {0}...", this.name);
 
-            this.blockStoreSignaled.ShutDown();
+            this.blockStoreSignaled.Dispose();
             this.blockStoreManager.BlockStoreLoop.ShutDown();
-            this.blockStoreCache.Dispose();
             this.blockRepository.Dispose();
         }
     }

@@ -1,8 +1,7 @@
 ﻿using System;
 using System.Net;
-using NBitcoin.Protocol;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using Stratis.Bitcoin.Utilities.JsonConverters;
 
 namespace Stratis.Bitcoin.P2P
 {
@@ -12,42 +11,34 @@ namespace Stratis.Bitcoin.P2P
     [JsonObject]
     public sealed class PeerAddress
     {
-        private const int PeerAddressLastSeen = 30;
+        /// <summary>
+        /// The maximum amount of times a peer can be attempted within a give time frame.
+        /// </summary>
+        internal const int AttemptThreshold = 5;
 
-        private const int PeerMinimumFailDays = 7;
+        /// <summary>
+        /// The amount of hours we will wait before selecting an attempted peer again,
+        /// if it hasn't yet reached the <see cref="AttemptThreshold"/> amount of attempts.
+        /// </summary>
+        internal const int AttempThresholdHours = 1;
 
-        private const int PeerMaximumWeeklyAttempts = 10;
+        /// <summary>
+        /// The amount of hours after which the peer's failed connection attempts
+        /// will be reset to zero.
+        /// </summary>
+        internal const int AttemptResetThresholdHours = 12;
 
-        private const int PeerMaximumConnectionRetries = 3;
-
-        /// <summary>EndPoint of this peer.</summary>
-        [JsonProperty]
+        /// <summary>Endpoint of this peer.</summary>
+        [JsonProperty(PropertyName = "endpoint")]
         [JsonConverter(typeof(IPEndPointConverter))]
-        private IPEndPoint endPoint;
+        public IPEndPoint Endpoint { get; set; }
 
         /// <summary>Used to construct the <see cref="NetworkAddress"/> after deserializing this peer.</summary>
-        [JsonProperty]
+        [JsonProperty(PropertyName = "addressTime", NullValueHandling = NullValueHandling.Ignore)]
         private DateTimeOffset? addressTime;
 
-        /// <summary>The <see cref="NetworkAddress"/> of this peer.</summary>
-        [JsonIgnore]
-        public NetworkAddress NetworkAddress
-        {
-            get
-            {
-                if (this.endPoint == null)
-                    return null;
-
-                var networkAddress = new NetworkAddress(this.endPoint);
-                if (this.addressTime != null)
-                    networkAddress.Time = this.addressTime.Value;
-
-                return networkAddress;
-            }
-        }
-
         /// <summary>The source address of this peer.</summary>
-        [JsonProperty]
+        [JsonProperty(PropertyName = "loopback")]
         private string loopback;
 
         [JsonIgnore]
@@ -66,7 +57,7 @@ namespace Stratis.Bitcoin.P2P
         /// <para>
         /// This gets reset when a connection was successful.</para>
         /// </summary>
-        [JsonProperty]
+        [JsonProperty(PropertyName = "connectionAttempts")]
         public int ConnectionAttempts { get; private set; }
 
         /// <summary>
@@ -75,22 +66,75 @@ namespace Stratis.Bitcoin.P2P
         /// This is set when the connection attempt was successful and a handshake was done.
         /// </para>
         /// </summary>
-        [JsonProperty]
+        [JsonProperty(PropertyName = "lastConnectionHandshake", NullValueHandling = NullValueHandling.Ignore)]
         public DateTimeOffset? LastConnectionHandshake { get; private set; }
 
         /// <summary>
-        /// <c>True</c> if <see cref="LastConnectionAttempt"/>, <see cref="LastConnectionSuccess"/> and
-        /// <see cref="LastConnectionHandshake"/> is null.
+        /// The last time this peer was seen.
+        /// <para>
+        /// This is set via <see cref="Protocol.Behaviors.PingPongBehavior"/> to ensure that a peer is live.
+        /// </para>
+        /// </summary>
+        [JsonProperty(PropertyName = "lastSeen", NullValueHandling = NullValueHandling.Ignore)]
+        public DateTime? LastSeen { get; private set; }
+
+        /// <summary>
+        /// <c>True</c> if the peer has had connection attempts but none successful.
         /// </summary>
         [JsonIgnore]
-        public bool IsNew
+        public bool Attempted
         {
             get
             {
                 return
-                    this.LastConnectionAttempt == null &&
-                    this.LastConnectionSuccess == null &&
-                    this.LastConnectionHandshake == null;
+                    (this.LastAttempt != null) &&
+                    (this.LastConnectionSuccess == null) &&
+                    (this.LastConnectionHandshake == null);
+            }
+        }
+
+        /// <summary>
+        /// <c>True</c> if the peer has had a successful connection attempt.
+        /// </summary>
+        [JsonIgnore]
+        public bool Connected
+        {
+            get
+            {
+                return
+                    (this.LastAttempt == null) &&
+                    (this.LastConnectionSuccess != null) &&
+                    (this.LastConnectionHandshake == null);
+            }
+        }
+
+        /// <summary>
+        /// <c>True</c> if the peer has never had connection attempts.
+        /// </summary>
+        [JsonIgnore]
+        public bool Fresh
+        {
+            get
+            {
+                return
+                    (this.LastAttempt == null) &&
+                    (this.LastConnectionSuccess == null) &&
+                    (this.LastConnectionHandshake == null);
+            }
+        }
+
+        /// <summary>
+        /// <c>True</c> if the peer has had a successful connection attempt and handshaked.
+        /// </summary>
+        [JsonIgnore]
+        public bool Handshaked
+        {
+            get
+            {
+                return
+                    (this.LastAttempt == null) &&
+                    (this.LastConnectionSuccess != null) &&
+                    (this.LastConnectionHandshake != null);
             }
         }
 
@@ -100,8 +144,8 @@ namespace Stratis.Bitcoin.P2P
         /// This is set regardless of whether or not the connection attempt was successful or not.
         /// </para>
         /// </summary>
-        [JsonProperty]
-        public DateTimeOffset? LastConnectionAttempt { get; private set; }
+        [JsonProperty(PropertyName = "lastConnectionAttempt", NullValueHandling = NullValueHandling.Ignore)]
+        public DateTimeOffset? LastAttempt { get; private set; }
 
         /// <summary>
         /// The last successful connection attempt.
@@ -109,37 +153,60 @@ namespace Stratis.Bitcoin.P2P
         /// This is set when the connection attempt was successful (but not necessarily handshaked).
         /// </para>
         /// </summary>
-        [JsonProperty]
+        [JsonProperty(PropertyName = "lastConnectionSuccess", NullValueHandling = NullValueHandling.Ignore)]
         public DateTimeOffset? LastConnectionSuccess { get; private set; }
 
         /// <summary>
-        /// Increments <see cref="ConnectionAttempts"/> and sets the <see cref="LastConnectionAttempt"/>.
+        /// The last time this peer was discovered from.
         /// </summary>
-        internal void Attempted(DateTimeOffset peerAttemptedAt)
+        [JsonIgnore]
+        public DateTime? LastDiscoveredFrom { get; private set; }
+
+        /// <summary>
+        /// Resets the amount of <see cref="ConnectionAttempts"/>.
+        /// <para>
+        /// This is reset when the amount of failed connection attempts reaches 
+        /// the <see cref="PeerAddress.AttemptThreshold"/> and the last attempt was 
+        /// made more than <see cref="PeerAddress.AttemptResetThresholdHours"/> ago.
+        /// </para>
+        /// </summary>
+        internal void ResetAttempts()
+        {
+            this.ConnectionAttempts = 0;
+        }
+
+        /// <summary>
+        /// Increments <see cref="ConnectionAttempts"/> and sets the <see cref="LastAttempt"/>.
+        /// </summary>
+        internal void SetAttempted(DateTime peerAttemptedAt)
         {
             this.ConnectionAttempts += 1;
-            this.LastConnectionAttempt = peerAttemptedAt;
+
+            this.LastAttempt = peerAttemptedAt;
+            this.LastConnectionSuccess = null;
+            this.LastConnectionHandshake = null;
         }
 
         /// <summary>
         /// Sets the <see cref="LastConnectionSuccess"/>, <see cref="addressTime"/> and <see cref="NetworkAddress.Time"/> properties.
         /// <para>
-        /// Resets <see cref="ConnectionAttempts"/> and <see cref="LastConnectionAttempt"/>.
-        /// </para>
-        /// <para>
-        /// TODO: [NBitcoin] Do we need to throttle the update of lastSuccessfulConnect?
-        /// https://github.com/stratisproject/NStratis/blob/2b0fbc3f6b809d92aaf43a8ee12f8baa724e5ccf/NBitcoin/Protocol/AddressManager.cs#L1014
+        /// Resets <see cref="ConnectionAttempts"/> and <see cref="LastAttempt"/>.
         /// </para>
         /// </summary>
         internal void SetConnected(DateTimeOffset peerConnectedAt)
         {
             this.addressTime = peerConnectedAt;
-            this.NetworkAddress.Time = peerConnectedAt;
 
-            this.LastConnectionAttempt = null;
+            this.LastAttempt = null;
             this.ConnectionAttempts = 0;
 
             this.LastConnectionSuccess = peerConnectedAt;
+        }
+
+        /// <summary>Sets the <see cref="LastDiscoveredFrom"/> time.</summary>
+        internal void SetDiscoveredFrom(DateTime lastDiscoveredFrom)
+        {
+            this.LastDiscoveredFrom = lastDiscoveredFrom;
         }
 
         /// <summary>Sets the <see cref="LastConnectionHandshake"/> date.</summary>
@@ -148,197 +215,36 @@ namespace Stratis.Bitcoin.P2P
             this.LastConnectionHandshake = peerHandshakedAt;
         }
 
-        /// <summary>
-        /// Determines whether the peer will be selected by the <see cref="IPeerConnector"/> when connecting.
-        /// </summary>
-        /// <seealso cref="PeerHasNeverBeenConnectedTo"/>
-        /// <seealso cref="PeerHasBeenConnectedTo"/>
-        [JsonIgnore]
-        public bool Preferred
+        /// <summary>Sets the <see cref="LastSeen"/> date.</summary>
+        internal void SetLastSeen(DateTime lastSeenAt)
         {
-            get
-            {
-                if (this.LastConnectionSuccess == null)
-                    return this.PeerHasNeverBeenConnectedTo;
-
-                return this.PeerHasBeenConnectedTo;
-            }
-        }
-
-        /// <summary>
-        /// Preference condition if the peer has never been connected to.
-        /// <list>
-        /// <item>1: Prefer the peer if it is new (never attempted and never connected to).</item>
-        /// <item>2: The last connection attempt was more than 60 seconds ago.</item>
-        /// <item>3: The maximum number of retries has not been reached.</item>
-        /// </list>
-        /// </summary>
-        [JsonIgnore]
-        private bool PeerHasNeverBeenConnectedTo
-        {
-            get
-            {
-                if (this.LastConnectionAttempt == null)
-                    return true;
-
-                return
-                    this.LastConnectionAttempt.Value >= DateTimeOffset.Now - TimeSpan.FromSeconds(60) &&
-                    this.ConnectionAttempts < PeerMaximumConnectionRetries;
-            }
-        }
-
-        /// <summary>
-        /// Preference condition if the peer has been connected to.
-        /// <list>
-        /// <item>1: The peer has been seen in the last 30 days..</item>
-        /// <item>2: The last connection successful connection was less than a week ago.</item>
-        /// <item>3: The maximum number of failures has not been reached.</item>
-        /// </list>
-        /// </summary>
-        [JsonIgnore]
-        private bool PeerHasBeenConnectedTo
-        {
-            get
-            {
-                if (DateTimeOffset.Now - this.NetworkAddress.Time > TimeSpan.FromDays(PeerAddressLastSeen))
-                    return false;
-
-                return
-                    DateTimeOffset.Now - this.LastConnectionSuccess < TimeSpan.FromDays(PeerMinimumFailDays) &&
-                    this.ConnectionAttempts < PeerMaximumWeeklyAttempts;
-            }
-        }
-
-        /// <summary>Refer to <see cref="PeerIntroductionType"/> for what the individual types mean.</summary>
-        [JsonIgnore]
-        public PeerIntroductionType? PeerIntroductionType { get; set; }
-
-        /// <summary>
-        /// Calculates the relative chance this peer should be given when selecting nodes to connect to.
-        /// <para>
-        /// This logic was taken from NBitcoin's implementation.
-        /// </para>
-        /// <para>
-        /// We effectively "deprioritize" the peer away after each failed attempt,
-        /// making it harder for the peer to be able to be selected by the
-        /// address manager. But at most no more than 1/28th to avoid the search taking forever
-        /// or overly penalizing outages.
-        /// </para>
-        /// </summary>
-        internal double Selectability
-        {
-            get
-            {
-                double selectability = 1.0;
-
-                var timeSinceLastAttempt = DateTimeOffset.Now - this.LastConnectionAttempt;
-                if (timeSinceLastAttempt < TimeSpan.Zero)
-                    timeSinceLastAttempt = TimeSpan.Zero;
-
-                // If the last attempt was less than 10 minutes away,
-                // deprioritize the peer by 10%.
-                if (timeSinceLastAttempt < TimeSpan.FromMinutes(10))
-                    selectability *= 0.01;
-
-                // Deprioritize 66% after each failed attempt, but at most 1/28th
-                // to avoid the search taking forever or overly penalizing outages.
-                selectability *= Math.Pow(0.66, Math.Min(this.ConnectionAttempts, 8));
-
-                return selectability;
-            }
+            this.LastSeen = lastSeenAt;
         }
 
         /// <summary>
         /// Creates a new peer address instance.
         /// </summary>
-        /// <param name="address">The network address of the peer.</param>
-        /// <param name="peerIntroductionType">How the peer will be introduced to the address manager.</param>
-        public static PeerAddress Create(NetworkAddress address, PeerIntroductionType peerIntroductionType)
+        /// <param name="endPoint">The end point of the peer.</param>
+        public static PeerAddress Create(IPEndPoint endPoint)
         {
             return new PeerAddress
             {
                 ConnectionAttempts = 0,
-                endPoint = address.Endpoint,
-                loopback = IPAddress.Loopback.ToString(),
-                PeerIntroductionType = peerIntroductionType
+                Endpoint = endPoint,
+                loopback = IPAddress.Loopback.ToString()
             };
         }
 
         /// <summary>
         /// Creates a new peer address instance and sets the loopback address (source).
         /// </summary>
-        /// <param name="address">The network address of the peer.</param>
+        /// <param name="endPoint">The end point of the peer.</param>
         /// <param name="loopback">The loopback (source) of the peer.</param>
-        /// <param name="peerIntroductionType">How the peer will be introduced to the address manager.</param>
-        public static PeerAddress Create(NetworkAddress address, IPAddress loopback, PeerIntroductionType peerIntroductionType)
+        public static PeerAddress Create(IPEndPoint endPoint, IPAddress loopback)
         {
-            var peer = Create(address, peerIntroductionType);
+            var peer = Create(endPoint);
             peer.loopback = loopback.ToString();
             return peer;
-        }
-
-        /// <summary>Match the peer with another by IP and port.</summary>
-        public bool Match(IPEndPoint endPoint)
-        {
-            return this.endPoint.Address.ToString() == endPoint.Address.ToString() && this.endPoint.Port == endPoint.Port;
-        }
-    }
-
-    /// <summary>
-    /// These flags are used to show how a peer was added to the <see cref="PeerAddressManager"/>'s peer
-    /// collection.
-    /// </summary>
-    public enum PeerIntroductionType
-    {
-        /// <summary>
-        /// Used when nodes are discovered via <see cref="PeerDiscoveryLoop"/>. This is also
-        /// the default state when loading the peers from disk.
-        /// </summary>
-        Discover,
-
-        /// <summary>Used when nodes are added via the -addnode argument when starting up the node.</summary>
-        Add,
-
-        /// <summary>Used when nodes are added via the -connect argument when starting up the node.</summary>
-        Connect
-    }
-
-    /// <summary>
-    /// Converter used to convert <see cref="IPEndPoint"/> to and from JSON.
-    /// </summary>
-    /// <seealso cref="JsonConverter" />
-    public sealed class IPEndPointConverter : JsonConverter
-    {
-        /// <inheritdoc />
-        public override bool CanConvert(Type objectType)
-        {
-            return objectType == typeof(IPEndPoint);
-        }
-
-        /// <inheritdoc />
-        public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
-        {
-            var json = JToken.Load(reader).ToString();
-            if (string.IsNullOrWhiteSpace(json))
-                return null;
-
-            var endPointComponents = json.Split('|');
-            return new IPEndPoint(IPAddress.Parse(endPointComponents[0]), Convert.ToInt32(endPointComponents[1]));
-        }
-
-        /// <inheritdoc />
-        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
-        {
-            if (value is IPEndPoint ipEndPoint)
-            {
-                if (ipEndPoint.Address != null || ipEndPoint.Port != 0)
-                {
-                    JToken.FromObject(string.Format("{0}|{1}", ipEndPoint.Address, ipEndPoint.Port)).WriteTo(writer);
-                    return;
-                }
-            }
-
-            writer.WriteNull();
         }
     }
 }

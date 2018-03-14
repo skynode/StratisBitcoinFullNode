@@ -20,7 +20,7 @@ namespace Stratis.Bitcoin.P2P.Peer
 
         public NetworkPeerServices Services { get; set; }
 
-        public TransactionOptions PreferredTransactionOptions { get; set; }
+        public NetworkOptions PreferredTransactionOptions { get; set; }
 
         public string UserAgent { get; set; }
         public int ReceiveBufferSize { get; set; }
@@ -30,8 +30,6 @@ namespace Stratis.Bitcoin.P2P.Peer
 
         public ulong? Nonce { get; set; }
 
-        /// <summary>Whether we reuse a 1MB buffer for deserializing messages, for limiting GC activity (Default : true).</summary>
-        public bool ReuseBuffer { get; set; }
         public CancellationToken ConnectCancellation { get; set; }
 
         private readonly NetworkPeerBehaviorsCollection templateBehaviors = new NetworkPeerBehaviorsCollection(null);
@@ -39,7 +37,6 @@ namespace Stratis.Bitcoin.P2P.Peer
 
         public NetworkPeerConnectionParameters()
         {
-            this.ReuseBuffer = true;
             this.TemplateBehaviors.Add(new PingPongBehavior());
             this.Version = ProtocolVersion.PROTOCOL_VERSION;
             this.IsRelay = true;
@@ -48,7 +45,8 @@ namespace Stratis.Bitcoin.P2P.Peer
             this.ReceiveBufferSize = 1000 * 5000;
             this.SendBufferSize = 1000 * 1000;
             this.UserAgent = VersionPayload.GetNBitcoinUserAgent();
-            this.PreferredTransactionOptions = TransactionOptions.All;
+            this.PreferredTransactionOptions = NetworkOptions.TemporaryOptions;
+            this.Nonce = RandomUtils.GetUInt64();
         }
 
         public NetworkPeerConnectionParameters(NetworkPeerConnectionParameters other)
@@ -63,7 +61,6 @@ namespace Stratis.Bitcoin.P2P.Peer
             this.AddressFrom = other.AddressFrom;
             this.Nonce = other.Nonce;
             this.Advertize = other.Advertize;
-            this.ReuseBuffer = other.ReuseBuffer;
             this.PreferredTransactionOptions = other.PreferredTransactionOptions;
 
             foreach (INetworkPeerBehavior behavior in other.TemplateBehaviors)
@@ -77,15 +74,15 @@ namespace Stratis.Bitcoin.P2P.Peer
             return new NetworkPeerConnectionParameters(this);
         }
 
-        public VersionPayload CreateVersion(IPEndPoint peer, Network network)
+        public VersionPayload CreateVersion(IPEndPoint peerAddress, Network network, DateTimeOffset timeStamp)
         {
             VersionPayload version = new VersionPayload()
             {
                 Nonce = this.Nonce == null ? RandomUtils.GetUInt64() : this.Nonce.Value,
                 UserAgent = this.UserAgent,
                 Version = this.Version,
-                Timestamp = DateTimeOffset.UtcNow,
-                AddressReceiver = peer,
+                Timestamp = timeStamp,
+                AddressReceiver = peerAddress,
                 AddressFrom = this.AddressFrom ?? new IPEndPoint(IPAddress.Parse("0.0.0.0").MapToIPv6Ex(), network.DefaultPort),
                 Relay = this.IsRelay,
                 Services = this.Services

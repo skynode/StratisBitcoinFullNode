@@ -156,7 +156,8 @@ namespace Stratis.Bitcoin.Features.Wallet.Interfaces
         /// <param name="transaction">The transaction.</param>
         /// <param name="blockHeight">The height of the block this transaction came from. Null if it was not a transaction included in a block.</param>
         /// <param name="block">The block in which this transaction was included.</param>
-        void ProcessTransaction(Transaction transaction, int? blockHeight = null, Block block = null);
+        /// <param name="isPropagated">Transaction propagation state.</param>
+        void ProcessTransaction(Transaction transaction, int? blockHeight = null, Block block = null, bool isPropagated = true);
 
         /// <summary>
         /// Saves the wallet into the file system.
@@ -226,6 +227,11 @@ namespace Stratis.Bitcoin.Features.Wallet.Interfaces
         /// <returns>Whether any wallet files are loaded.</returns>
         bool ContainsWallets { get; }
 
+        /// <summary>
+        /// Gets the extended public key of an account.
+        /// </summary>
+        /// <param name="accountReference">The account.</param>
+        /// <returns>The extended plublic key.</returns>
         string GetExtPubKey(WalletAccountReference accountReference);
 
         /// <summary>

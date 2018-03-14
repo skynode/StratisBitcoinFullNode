@@ -101,8 +101,7 @@ namespace Stratis.Bitcoin.Features.MemoryPool.Tests
             string fileName = "mempool.dat";
             NodeSettings settings = this.CreateSettings("LoadPoolTest_WithBadTransactions");
             IEnumerable<MempoolPersistenceEntry> toSave = this.CreateTestEntries(numTx);
-            TxMempool unused;
-            MempoolManager mempoolManager = CreateTestMempool(settings, out unused);
+            MempoolManager mempoolManager = CreateTestMempool(settings, out TxMempool unused);
 
             MemPoolSaveResult result = (new MempoolPersistence(settings, new LoggerFactory())).Save(toSave, fileName);
             mempoolManager.LoadPoolAsync(fileName).GetAwaiter().GetResult();
@@ -271,8 +270,8 @@ namespace Stratis.Bitcoin.Features.MemoryPool.Tests
             var mempoolSettings = new MempoolSettings(settings);
             IDateTimeProvider dateTimeProvider = DateTimeProvider.Default;
             NodeSettings nodeSettings = NodeSettings.Default();
-            LoggerFactory loggerFactory = new LoggerFactory();
-            ConsensusSettings consensusSettings = new ConsensusSettings(nodeSettings, loggerFactory);
+            var loggerFactory = nodeSettings.LoggerFactory;
+            ConsensusSettings consensusSettings = new ConsensusSettings().Load(nodeSettings);
             txMemPool = new TxMempool(dateTimeProvider, new BlockPolicyEstimator(new MempoolSettings(nodeSettings), loggerFactory, nodeSettings), loggerFactory, nodeSettings);
             var mempoolLock = new MempoolSchedulerLock();
             var coins = new InMemoryCoinView(settings.Network.GenesisHash);

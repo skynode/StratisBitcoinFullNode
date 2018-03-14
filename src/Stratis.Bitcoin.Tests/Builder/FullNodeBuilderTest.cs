@@ -5,6 +5,7 @@ using NBitcoin;
 using Stratis.Bitcoin.Builder;
 using Stratis.Bitcoin.Builder.Feature;
 using Stratis.Bitcoin.Configuration;
+using Stratis.Bitcoin.Utilities;
 using Xunit;
 
 namespace Stratis.Bitcoin.Tests.Builder
@@ -13,7 +14,7 @@ namespace Stratis.Bitcoin.Tests.Builder
     {
         public class DummyFeature : FullNodeFeature
         {
-            public override void Start()
+            public override void Initialize()
             {
                 // nothing.
             }
@@ -102,9 +103,9 @@ namespace Stratis.Bitcoin.Tests.Builder
         [Fact]
         public void BuildWithInitialServicesSetupConfiguresFullNodeUsingConfiguration()
         {
-            var nodeSettings = new NodeSettings();
-            nodeSettings.DataDir = "TestData/FullNodeBuilder/BuildWithInitialServicesSetup";
-            nodeSettings.DataFolder = new DataFolder(nodeSettings);
+            var dataDir = "TestData/FullNodeBuilder/BuildWithInitialServicesSetup";
+            var nodeSettings = new NodeSettings(args:new string[] { $"-datadir={dataDir}" });
+            nodeSettings.DataFolder = new DataFolder(nodeSettings.DataDir);
 
             this.fullNodeBuilder = new FullNodeBuilder(nodeSettings, this.serviceCollectionDelegates, this.serviceProviderDelegates, this.featureCollectionDelegates, this.featureCollection);
 
@@ -119,12 +120,6 @@ namespace Stratis.Bitcoin.Tests.Builder
                 e.AddFeature<DummyFeature>();
             });
 
-            this.fullNodeBuilder.ConfigureServiceProvider(e =>
-            {
-                var settings = e.GetService<NodeSettings>();
-                settings.Testnet = true;
-            });
-
             var result = this.fullNodeBuilder.Build();
 
             Assert.NotNull(result);
@@ -133,26 +128,22 @@ namespace Stratis.Bitcoin.Tests.Builder
         [Fact]
         public void BuildConfiguresFullNodeUsingConfiguration()
         {
-            var nodeSettings = new NodeSettings();
-            nodeSettings.DataDir = "TestData/FullNodeBuilder/BuildConfiguresFullNodeUsingConfiguration";
+            var dataDir = "TestData/FullNodeBuilder/BuildConfiguresFullNodeUsingConfiguration";
+            var nodeSettings = new NodeSettings(args: new string[] { $"-datadir={dataDir}" });
+            nodeSettings.DataFolder = new DataFolder(nodeSettings.DataDir);
 
             this.fullNodeBuilder.ConfigureServices(e =>
             {
                 e.AddSingleton(nodeSettings);
                 e.AddSingleton(nodeSettings.LoggerFactory);
-                e.AddSingleton(nodeSettings.GetNetwork());
+                e.AddSingleton(nodeSettings.Network);
                 e.AddSingleton<FullNode>();
+                e.AddSingleton<IDateTimeProvider, DateTimeProvider>();
             });
 
             this.fullNodeBuilder.ConfigureFeature(e =>
             {
                 e.AddFeature<DummyFeature>();
-            });
-
-            this.fullNodeBuilder.ConfigureServiceProvider(e =>
-            {
-                var settings = e.GetService<NodeSettings>();
-                settings.Testnet = true;
             });
 
             var result = this.fullNodeBuilder.Build();
@@ -168,7 +159,7 @@ namespace Stratis.Bitcoin.Tests.Builder
                 this.fullNodeBuilder.ConfigureServices(e =>
                 {
                     e.AddSingleton<NodeSettings>();
-                    e.AddSingleton<Network>(NodeSettings.Default().GetNetwork());
+                    e.AddSingleton<Network>(NodeSettings.Default().Network);
                 });
 
                 this.fullNodeBuilder.Build();
@@ -179,8 +170,9 @@ namespace Stratis.Bitcoin.Tests.Builder
         [Fact]
         public void BuildTwiceThrowsException()
         {
-            var nodeSettings = new NodeSettings();
-            nodeSettings.DataDir = "TestData/FullNodeBuilder/BuildConfiguresFullNodeUsingConfiguration";
+            var dataDir = "TestData/FullNodeBuilder/BuildConfiguresFullNodeUsingConfiguration";
+            var nodeSettings = new NodeSettings(args: new string[] { $"-datadir={dataDir}" });
+            nodeSettings.DataFolder = new DataFolder(nodeSettings.DataDir);
 
             Assert.Throws<InvalidOperationException>(() =>
             {
@@ -188,8 +180,9 @@ namespace Stratis.Bitcoin.Tests.Builder
                 {
                     e.AddSingleton(nodeSettings);
                     e.AddSingleton(nodeSettings.LoggerFactory);
-                    e.AddSingleton(nodeSettings.GetNetwork());
+                    e.AddSingleton(nodeSettings.Network);
                     e.AddSingleton<FullNode>();
+                    e.AddSingleton<IDateTimeProvider, DateTimeProvider>();
                 });
 
                 this.fullNodeBuilder.Build();

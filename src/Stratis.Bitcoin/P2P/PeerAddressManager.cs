@@ -3,10 +3,11 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using Microsoft.Extensions.Logging;
 using NBitcoin;
-using NBitcoin.Protocol;
 using Stratis.Bitcoin.Configuration;
-using Stratis.Bitcoin.Utilities.FileStorage;
+using Stratis.Bitcoin.Utilities;
+using Stratis.Bitcoin.Utilities.Extensions;
 
 namespace Stratis.Bitcoin.P2P
 {
@@ -22,10 +23,10 @@ namespace Stratis.Bitcoin.P2P
         /// <summary>
         /// Adds a peer to the <see cref="Peers"/> dictionary.
         /// <para>
-        /// Only routable IP addresses will be added. <see cref="IpExtensions.IsRoutable(IPAddress, bool)"/>
+        /// Only routable IP addresses will be added. See <see cref="IpExtensions.IsRoutable(IPAddress, bool)"/>.
         /// </para>
         /// </summary>
-        void AddPeer(NetworkAddress networkAddress, IPAddress source, PeerIntroductionType peerIntroductionType);
+        void AddPeer(IPEndPoint endPoint, IPAddress source);
 
         /// <summary>
         /// Add a set of peers to the <see cref="Peers"/> dictionary.
@@ -33,7 +34,7 @@ namespace Stratis.Bitcoin.P2P
         /// Only routable IP addresses will be added. <see cref="IpExtensions.IsRoutable(IPAddress, bool)"/>
         /// </para>
         /// </summary>
-        void AddPeers(NetworkAddress[] networkAddress, IPAddress source, PeerIntroductionType introductionType);
+        void AddPeers(IPEndPoint[] endPoints, IPAddress source);
 
         /// <summary> Find a peer by endpoint.</summary>
         PeerAddress FindPeer(IPEndPoint endPoint);
@@ -50,16 +51,21 @@ namespace Stratis.Bitcoin.P2P
         /// Increments <see cref="PeerAddress.ConnectionAttempts"/> of the peer as well as the <see cref="PeerAddress.LastConnectionSuccess"/>
         /// </para>
         /// </summary>
-        void PeerAttempted(IPEndPoint endpoint, DateTimeOffset peerAttemptedAt);
+        void PeerAttempted(IPEndPoint endpoint, DateTime peerAttemptedAt);
 
         /// <summary>
         /// A peer was successfully connected to.
         /// <para>
-        /// Resets the <see cref="PeerAddress.ConnectionAttempts"/> and <see cref="PeerAddress.LastConnectionAttempt"/> of the peer.
+        /// Resets the <see cref="PeerAddress.ConnectionAttempts"/> and <see cref="PeerAddress.LastAttempt"/> of the peer.
         /// Sets the peer's <see cref="PeerAddress.LastConnectionSuccess"/> to now.
         /// </para>
         /// </summary>
         void PeerConnected(IPEndPoint endpoint, DateTimeOffset peerAttemptedAt);
+
+        /// <summary>
+        /// Sets the last time the peer was asked for addresses via discovery.
+        /// </summary>
+        void PeerDiscoveredFrom(IPEndPoint endpoint, DateTime peerDiscoveredFrom);
 
         /// <summary>
         /// A version handshake between two peers was successful.
@@ -70,46 +76,53 @@ namespace Stratis.Bitcoin.P2P
         void PeerHandshaked(IPEndPoint endpoint, DateTimeOffset peerAttemptedAt);
 
         /// <summary>
-        /// Selects a random peer (by <see cref="PeerIntroductionType"/>) to connect to.
-        /// <para>
-        /// Use a 50% chance for choosing between tried and new peers.
-        /// </para>
+        /// Sets the last time the peer was seen.
         /// </summary>
-        NetworkAddress SelectPeerToConnectTo(PeerIntroductionType peerIntroductionType);
+        void PeerSeen(IPEndPoint endpoint, DateTime peerSeenAt);
 
-        /// <summary>
-        /// Selects a random set of preferred peers to connects to.
-        /// <para>
-        /// See <see cref="PeerAddressExtensions.Random(IEnumerable{PeerAddress})"/>.
-        /// </para>
-        /// </summary>
-        IEnumerable<NetworkAddress> SelectPeersToConnectTo();
+        /// <summary>Peer selector instance, used to select peers to connect to.</summary>
+        IPeerSelector PeerSelector { get; }
     }
 
     /// <summary>
     /// This manager keeps a set of peers discovered on the network in cache and on disk.
     /// <para>
-    /// The manager updates their states according to how recent they have been connected to.
+    /// The manager updates peer state according to how recent they have been connected to or not.
     /// </para>
     /// </summary>
     public sealed class PeerAddressManager : IPeerAddressManager
     {
-        public PeerAddressManager()
-        {
-            this.Peers = new ConcurrentDictionary<IPEndPoint, PeerAddress>();
-        }
+        /// <summary>Provider of time functions.</summary>
+        private readonly IDateTimeProvider dateTimeProvider;
 
-        public PeerAddressManager(DataFolder peerFilePath) : this()
-        {
-            this.PeerFilePath = peerFilePath;
-        }
+        /// <summary>Instance logger.</summary>
+        private readonly ILogger logger;
+
+        /// <summary>Logger factory to create loggers.</summary>
+        private readonly ILoggerFactory loggerFactory;
 
         /// <inheritdoc />
         public ConcurrentDictionary<IPEndPoint, PeerAddress> Peers { get; private set; }
 
+        /// <summary>The file name of the peers file.</summary>
         internal const string PeerFileName = "peers.json";
 
+        /// <inheritdoc />
         public DataFolder PeerFilePath { get; set; }
+
+        /// <summary>Peer selector instance, used to select peers to connect to.</summary>
+        public IPeerSelector PeerSelector { get; private set; }
+
+        /// <summary>Constructor used by dependency injection.</summary>
+        public PeerAddressManager(IDateTimeProvider dateTimeProvider, DataFolder peerFilePath, ILoggerFactory loggerFactory)
+        {
+            this.dateTimeProvider = dateTimeProvider;
+            this.loggerFactory = loggerFactory;
+            this.logger = loggerFactory.CreateLogger(this.GetType().FullName);
+            this.Peers = new ConcurrentDictionary<IPEndPoint, PeerAddress>();
+            this.PeerFilePath = peerFilePath;
+            this.PeerSelector = new PeerSelector(this.dateTimeProvider, this.loggerFactory, this.Peers);
+        }
 
         /// <inheritdoc />
         public void LoadPeers()
@@ -118,8 +131,7 @@ namespace Stratis.Bitcoin.P2P
             var peers = fileStorage.LoadByFileName(PeerFileName);
             peers.ForEach(peer =>
             {
-                peer.PeerIntroductionType = PeerIntroductionType.Discover;
-                this.Peers.TryAdd(peer.NetworkAddress.Endpoint, peer);
+                this.Peers.TryAdd(peer.Endpoint, peer);
             });
         }
 
@@ -130,36 +142,46 @@ namespace Stratis.Bitcoin.P2P
                 return;
 
             var fileStorage = new FileStorage<List<PeerAddress>>(this.PeerFilePath.AddressManagerFilePath);
-            fileStorage.SaveToFile(this.Peers.Select(p => p.Value).ToList(), PeerFileName);
+            fileStorage.SaveToFile(this.Peers.OrderByDescending(p => p.Value.LastConnectionSuccess).Select(p => p.Value).ToList(), PeerFileName);
         }
 
         /// <inheritdoc/>
-        public void AddPeer(NetworkAddress networkAddress, IPAddress source, PeerIntroductionType peerIntroductionType)
+        public void AddPeer(IPEndPoint endPoint, IPAddress source)
         {
-            if (networkAddress.Endpoint.Address.IsRoutable(true) == false)
+            if (!endPoint.Address.IsRoutable(true))
                 return;
 
-            var peerToAdd = PeerAddress.Create(networkAddress, source, peerIntroductionType);
-            this.Peers.TryAdd(peerToAdd.NetworkAddress.Endpoint, peerToAdd);
+            var peerToAdd = PeerAddress.Create(endPoint, source);
+            this.Peers.TryAdd(peerToAdd.Endpoint, peerToAdd);
         }
 
         /// <inheritdoc/>
-        public void AddPeers(NetworkAddress[] networkAddresses, IPAddress source, PeerIntroductionType peerIntroductionType)
+        public void AddPeers(IPEndPoint[] endPoints, IPAddress source)
         {
-            foreach (var networkAddress in networkAddresses)
+            foreach (var endPoint in endPoints)
             {
-                this.AddPeer(networkAddress, source, peerIntroductionType);
+                this.AddPeer(endPoint, source);
             }
         }
 
         /// <inheritdoc/>
-        public void PeerAttempted(IPEndPoint endpoint, DateTimeOffset peerAttemptedAt)
+        public void PeerAttempted(IPEndPoint endpoint, DateTime peerAttemptedAt)
         {
             var peer = this.FindPeer(endpoint);
             if (peer == null)
                 return;
 
-            peer.Attempted(peerAttemptedAt);
+            //Reset the attempted count if:
+            //1: The last attempt was more than the threshold time ago.
+            //2: More than the threshold attempts was made.
+            if (peer.Attempted &&
+                peer.LastAttempt < this.dateTimeProvider.GetUtcNow().AddHours(-PeerAddress.AttemptResetThresholdHours) &&
+                peer.ConnectionAttempts >= PeerAddress.AttemptThreshold)
+            {
+                peer.ResetAttempts();
+            }
+
+            peer.SetAttempted(peerAttemptedAt);
         }
 
         /// <inheritdoc/>
@@ -173,6 +195,16 @@ namespace Stratis.Bitcoin.P2P
         }
 
         /// <inheritdoc/>
+        public void PeerDiscoveredFrom(IPEndPoint endpoint, DateTime peerDiscoveredFrom)
+        {
+            var peer = this.FindPeer(endpoint);
+            if (peer == null)
+                return;
+
+            peer.SetDiscoveredFrom(peerDiscoveredFrom);
+        }
+
+        /// <inheritdoc/>
         public void PeerHandshaked(IPEndPoint endpoint, DateTimeOffset peerHandshakedAt)
         {
             var peer = this.FindPeer(endpoint);
@@ -183,87 +215,28 @@ namespace Stratis.Bitcoin.P2P
         }
 
         /// <inheritdoc/>
+        public void PeerSeen(IPEndPoint endpoint, DateTime peerSeenAt)
+        {
+            var peer = this.FindPeer(endpoint);
+            if (peer == null)
+                return;
+
+            peer.SetLastSeen(peerSeenAt);
+        }
+
+        /// <inheritdoc/>
         public PeerAddress FindPeer(IPEndPoint endPoint)
         {
-            var peer = this.Peers.SingleOrDefault(p => p.Value.Match(endPoint));
+            var peer = this.Peers.Skip(0).SingleOrDefault(p => p.Key.Match(endPoint));
             if (peer.Value != null)
                 return peer.Value;
             return null;
         }
 
         /// <inheritdoc />
-        public NetworkAddress SelectPeerToConnectTo(PeerIntroductionType peerIntroductionType)
-        {
-            if (this.Peers.Tried(peerIntroductionType).Any() == true &&
-                (this.Peers.New(peerIntroductionType).Any() == false || GetRandomInteger(2) == 0))
-                return this.Peers.Tried(peerIntroductionType).Random().NetworkAddress;
-
-            if (this.Peers.New(peerIntroductionType).Any() == true)
-                return this.Peers.New(peerIntroductionType).Random().NetworkAddress;
-
-            return null;
-        }
-
-        /// <inheritdoc />
-        public IEnumerable<NetworkAddress> SelectPeersToConnectTo()
-        {
-            return this.Peers.Where(p => p.Value.Preferred).Select(p => p.Value.NetworkAddress);
-        }
-
-        internal static int GetRandomInteger(int max)
-        {
-            return (int)(RandomUtils.GetUInt32() % (uint)max);
-        }
-
-        /// <inheritdoc />
         public void Dispose()
         {
             this.SavePeers();
-        }
-    }
-
-    public static class PeerAddressExtensions
-    {
-        /// <summary>
-        /// Return peers where they have never have had a connection attempt or have been connected to.
-        /// </summary>
-        public static IEnumerable<PeerAddress> New(this ConcurrentDictionary<IPEndPoint, PeerAddress> peers, PeerIntroductionType peerIntroductionType)
-        {
-            var isNew = peers.Skip(0)
-                .Where(p => p.Value.PeerIntroductionType == peerIntroductionType)
-                .Where(p => p.Value.IsNew).Select(p => p.Value);
-            return isNew;
-        }
-
-        /// <summary>
-        /// Return peers where they have have had connection attempts, successful or not.
-        /// </summary>
-        public static IEnumerable<PeerAddress> Tried(this ConcurrentDictionary<IPEndPoint, PeerAddress> peers, PeerIntroductionType peerIntroductionType)
-        {
-            var tried = peers.Skip(0)
-                .Where(p => p.Value.PeerIntroductionType == peerIntroductionType)
-                .Where(p => !p.Value.IsNew).Select(p => p.Value);
-
-            return tried;
-        }
-
-        /// <summary>Return a random peer from a given set of peers.</summary>
-        public static PeerAddress Random(this IEnumerable<PeerAddress> peers)
-        {
-            var chanceFactor = 1.0;
-            while (true)
-            {
-                if (peers.Count() == 1)
-                    return peers.ToArray()[0];
-
-                var randomPeerIndex = PeerAddressManager.GetRandomInteger(peers.Count() - 1);
-                var randomPeer = peers.ToArray()[randomPeerIndex];
-
-                if (PeerAddressManager.GetRandomInteger(1 << 30) < chanceFactor * randomPeer.Selectability * (1 << 30))
-                    return randomPeer;
-
-                chanceFactor *= 1.2;
-            }
         }
     }
 }
