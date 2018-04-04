@@ -220,7 +220,7 @@ namespace Stratis.Bitcoin.Features.Miner
         private readonly CoinView coinView;
 
         /// <summary>Database of stake related data for the current blockchain.</summary>
-        private readonly StakeChain stakeChain;
+        private readonly IStakeChain stakeChain;
 
         /// <summary>Provides functionality for checking validity of PoS blocks.</summary>
         private readonly IStakeValidator stakeValidator;
@@ -339,7 +339,7 @@ namespace Stratis.Bitcoin.Features.Miner
             IInitialBlockDownloadState initialBlockDownloadState,
             INodeLifetime nodeLifetime,
             CoinView coinView,
-            StakeChain stakeChain,
+            IStakeChain stakeChain,
             IStakeValidator stakeValidator,
             MempoolSchedulerLock mempoolLock,
             ITxMempool mempool,
@@ -665,12 +665,12 @@ namespace Stratis.Bitcoin.Features.Miner
 
                     // We have to make sure that we have no future timestamps in
                     // our transactions set.
-                    foreach (Transaction transaction in block.Transactions)
+                    for (int i = block.Transactions.Count - 1; i >= 0; i--)
                     {
-                        if (transaction.Time > block.Header.Time)
+                        if (block.Transactions[i].Time > block.Header.Time)
                         {
-                            this.logger.LogTrace("Removing transaction with timestamp {0} as it is greater than coinstake transaction timestamp {1}.", transaction.Time, block.Header.Time);
-                            block.Transactions.Remove(transaction);
+                            this.logger.LogTrace("Removing transaction with timestamp {0} as it is greater than coinstake transaction timestamp {1}.", block.Transactions[i].Time, block.Header.Time);
+                            block.Transactions.Remove(block.Transactions[i]);
                         }
                     }
 
