@@ -1,4 +1,5 @@
 ﻿using System;
+using NBitcoin.Crypto;
 using NBitcoin.JsonConverters;
 using NBitcoin.OpenAsset;
 using Xunit;
@@ -7,19 +8,11 @@ namespace NBitcoin.Tests
 {
     public class JsonConverterTests
     {
-        public JsonConverterTests()
-        {
-            // These flags may get set due to static network initializers
-            // which include the initializers for Stratis.
-            Transaction.TimeStamp = false;
-            Block.BlockSignature = false;
-        }
-
         [Fact]
         [Trait("UnitTest", "UnitTest")]
         public void CanSerializeInJson()
         {
-            Key k = new Key();
+            var k = new Key();
             CanSerializeInJsonCore(DateTimeOffset.UtcNow);
             CanSerializeInJsonCore(new byte[] { 1, 2, 3 });
             CanSerializeInJsonCore(k);
@@ -33,7 +26,7 @@ namespace NBitcoin.Tests
             CanSerializeInJsonCore(k.PubKey.ScriptPubKey);
             CanSerializeInJsonCore(new Key().PubKey.WitHash.GetAddress(Network.Main));
             CanSerializeInJsonCore(new Key().PubKey.WitHash.ScriptPubKey.GetWitScriptAddress(Network.Main));
-            var sig = k.Sign(new uint256(RandomUtils.GetBytes(32)));
+            ECDSASignature sig = k.Sign(new uint256(RandomUtils.GetBytes(32)));
             CanSerializeInJsonCore(sig);
             CanSerializeInJsonCore(new TransactionSignature(sig, SigHash.All));
             CanSerializeInJsonCore(k.PubKey.Hash);
@@ -48,8 +41,8 @@ namespace NBitcoin.Tests
 
         private T CanSerializeInJsonCore<T>(T value)
         {
-            var str = Serializer.ToString(value);
-            var obj2 = Serializer.ToObject<T>(str);
+            string str = Serializer.ToString(value);
+            T obj2 = Serializer.ToObject<T>(str, Network.Main);
             Assert.Equal(str, Serializer.ToString(obj2));
             return obj2;
         }

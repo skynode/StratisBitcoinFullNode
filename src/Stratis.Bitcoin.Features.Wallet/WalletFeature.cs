@@ -1,9 +1,9 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using NBitcoin;
-using Stratis.Bitcoin.Broadcasting;
 using Stratis.Bitcoin.Builder;
 using Stratis.Bitcoin.Builder.Feature;
 using Stratis.Bitcoin.Configuration;
@@ -78,12 +78,6 @@ namespace Stratis.Bitcoin.Features.Wallet
             this.walletSettings = walletSettings;
         }
 
-        /// <inheritdoc />
-        public override void LoadConfiguration()
-        {
-            this.walletSettings.Load(this.nodeSettings);
-        }
-
         /// <summary>
         /// Prints command-line help.
         /// </summary>
@@ -93,15 +87,25 @@ namespace Stratis.Bitcoin.Features.Wallet
             WalletSettings.PrintHelp(network);
         }
 
+        /// <summary>
+        /// Get the default configuration.
+        /// </summary>
+        /// <param name="builder">The string builder to add the settings to.</param>
+        /// <param name="network">The network to base the defaults off.</param>
+        public static void BuildDefaultConfigurationFile(StringBuilder builder, Network network)
+        {
+            WalletSettings.BuildDefaultConfigurationFile(builder, network);
+        }
+
         /// <inheritdoc />
         public void AddNodeStats(StringBuilder benchLogs)
         {
-            WalletManager walletManager = this.walletManager as WalletManager;
+            var walletManager = this.walletManager as WalletManager;
 
             if (walletManager != null)
             {
                 int height = walletManager.LastBlockHeight();
-                ChainedBlock block = this.chain.GetBlock(height);
+                ChainedHeader block = this.chain.GetBlock(height);
                 uint256 hashBlock = block == null ? 0 : block.HashBlock;
 
                 benchLogs.AppendLine("Wallet.Height: ".PadRight(LoggingConfiguration.ColumnLength + 1) +
@@ -113,16 +117,16 @@ namespace Stratis.Bitcoin.Features.Wallet
         /// <inheritdoc />
         public void AddFeatureStats(StringBuilder benchLog)
         {
-            var walletNames = this.walletManager.GetWalletsNames();
+            IEnumerable<string> walletNames = this.walletManager.GetWalletsNames();
 
             if (walletNames.Any())
             {
                 benchLog.AppendLine();
                 benchLog.AppendLine("======Wallets======");
 
-                foreach (var walletName in walletNames)
+                foreach (string walletName in walletNames)
                 {
-                    var items = this.walletManager.GetSpendableTransactionsInWallet(walletName, 1);
+                    IEnumerable<UnspentOutputReference> items = this.walletManager.GetSpendableTransactionsInWallet(walletName, 1);
                     benchLog.AppendLine("Wallet: " + (walletName + ",").PadRight(LoggingConfiguration.ColumnLength) + " Confirmed balance: " + new Money(items.Sum(s => s.Transaction.Amount)).ToString());
                 }
             }
@@ -157,7 +161,7 @@ namespace Stratis.Bitcoin.Features.Wallet
     /// </summary>
     public static class FullNodeBuilderWalletExtension
     {
-        public static IFullNodeBuilder UseWallet(this IFullNodeBuilder fullNodeBuilder, Action<WalletSettings> setup = null)
+        public static IFullNodeBuilder UseWallet(this IFullNodeBuilder fullNodeBuilder)
         {
             LoggingConfiguration.RegisterFeatureNamespace<WalletFeature>("wallet");
 
@@ -178,7 +182,7 @@ namespace Stratis.Bitcoin.Features.Wallet
                         services.AddSingleton<WalletRPCController>();
                         services.AddSingleton<IBroadcasterManager, FullNodeBroadcasterManager>();
                         services.AddSingleton<BroadcasterBehavior>();
-                        services.AddSingleton<WalletSettings>(new WalletSettings(setup));
+                        services.AddSingleton<WalletSettings>();
                     });
             });
 

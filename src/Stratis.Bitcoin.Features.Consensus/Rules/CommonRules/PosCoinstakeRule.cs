@@ -2,13 +2,14 @@
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
+using Stratis.Bitcoin.Consensus.Rules;
 
 namespace Stratis.Bitcoin.Features.Consensus.Rules.CommonRules
 {
     /// <summary>
     /// Context checks on a POS block.
     /// </summary>
-    public class PosCoinstakeRule : PosConsensusRule
+    public class PosCoinstakeRule : StakeStoreConsensusRule
     {
         /// <inheritdoc />
         /// <exception cref="ConsensusErrors.BadStakeBlock">The coinbase output (first transaction) is not empty.</exception>
@@ -17,7 +18,7 @@ namespace Stratis.Bitcoin.Features.Consensus.Rules.CommonRules
         /// <exception cref="ConsensusErrors.BlockTimeBeforeTrx">The block contains a transaction with a timestamp after the block timestamp.</exception>
         public override Task RunAsync(RuleContext context)
         {
-            Block block = context.BlockValidationContext.Block;
+            Block block = context.ValidationContext.Block;
 
             if (BlockStake.IsProofOfStake(block))
             {
